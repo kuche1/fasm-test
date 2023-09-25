@@ -1,0 +1,69 @@
+
+;; https://www.youtube.com/watch?v=b-q4QBy52AA
+;; https://chromium.googlesource.com/chromiumos/docs/+/HEAD/constants/syscalls.md
+;; https://flatassembler.net/
+
+;; compile and run
+;; fasm hello-world.fasm && chmod +x hello-world && ./hello-world
+;;
+;; the executable is extremely small and is a static executable
+
+format ELF64 executable
+
+;;;;;;;;;;;;;;;;;;;;;;;;; comptime variables
+
+SYSCALL_WRITE = 1
+SYSCALL_EXIT = 60
+
+FILE_STDIN = 0
+FILE_STDOUT = 1
+FILE_STDERR = 2
+
+RET_CODE_SUCC = 0
+RET_CODE_FAIL = 1
+
+;; show that it really is a variable
+RET_CODE_SUCC = RET_CODE_SUCC + 1
+RET_CODE_SUCC = RET_CODE_SUCC - 1
+
+;;;;;;;;;;;;;;;;;;;;;;;;; macros
+
+macro exit code {
+    mov rax, SYSCALL_EXIT
+    mov rdi, code
+    syscall
+}
+
+macro write fd, buf, buf_len {
+    mov rax, SYSCALL_WRITE
+    mov rdi, fd
+    mov rsi, buf
+    mov rdx, buf_len
+    syscall
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;; code
+segment readable executable
+
+entry main
+;; define entry point
+
+main:
+repeat 5 ;; literaly copy-pastes
+    write FILE_STDOUT, msg, msg_len
+end repeat
+
+    ;;;;;; these are both equivalent
+    ;;mov rax, SYSCALL_EXIT
+    ;;mov rdi, RET_CODE_SUCC
+    ;;syscall
+    exit RET_CODE_SUCC
+
+;;;;;;;;;;;;;;;;;;;;;;;;; data
+segment readable writable
+
+msg db "hello, worlddddd", 10
+;; `10` means new line (ascii code)
+
+msg_len = $ - msg
+;; `$` is the address of the current line

@@ -1,0 +1,234 @@
+
+;; fasm file-transfer.fasm && chmod +x file-transfer && ./file-transfer
+
+;; info
+;;
+;; registers:
+;; rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14 (and more)
+;;
+;; syscall args go to:
+;; arg0(syscall-number)=rax arg1=rdi arg2=rsi arg3=rdx arg4=r10 arg5=r8 arg6=r9
+;;
+;; (hepefully all) syscall return to `rax`
+;;
+;; db - byte - 1 byte
+;; dw - word - 2 bytes
+;; dd - double word - 4 bytes
+;; dq - quad word - 8 bytes
+;;
+;; rax is 64bits
+;; eax is 32bits
+;; for more info see https://en.wikibooks.org/wiki/X86_Assembly/X86_Architecture
+
+;; debug tips
+;;
+;; omg you get NO SYMBOLS WTF
+;; no `main`, no `_start`, nothing
+;;
+;; run with `strace`
+;;
+;; `readelf -e <file>` and find the `entry point address`
+;; then in `gdb <file>` put a breakpoint on that address `b *0x4000b0`
+;; then `run` and `tui enable` and `layout asm`
+;; and you will get an asm view
+;;
+;; less retarded debugger is `gf` executable is called `gf2` https://github.com/nakst/gf
+;; again, break on the entry point using `b *0x4000b0`
+;; switch to the `registers` tab
+;; start with `run`
+;; use `ni` for next step
+
+format ELF64 executable
+
+;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants
+
+SYSCALL_WRITE equ 1
+SYSCALL_CLOSE equ 3
+SYSCALL_SOCKET equ 41
+SYSCALL_BIND equ 49
+SYSCALL_LISTEN equ 50
+SYSCALL_EXIT equ 60
+
+FILE_STDIN equ 0
+FILE_STDOUT equ 1
+FILE_STDERR equ 2
+
+RET_CODE_SUCC equ 0
+RET_CODE_FAIL equ 1
+RET_CODE_TCP_SOCKET_FAIL equ 2
+RET_CODE_BIND_FAIL equ 3
+RET_CODE_LISTEN_FAIL equ 4
+
+SOCKET_DOMAIN_IPV4 equ 2
+SOCKET_TYPE_TCP equ 1
+
+;;;;;;;;;;;;;;;; user constants
+
+MAX_CONNECTIONS equ 5
+
+;;;;;;;;;;;;;;;;;;;;;;;;; comptime variables
+
+ASDFG = 1
+ASDFG = ASDFG + 1
+
+;;;;;;;;;;;;;;;;;;;;;;;;; macros
+
+;;;;;;;;;;;;;; control flow macros
+
+macro syscall1 syscall_id, arg1
+{
+    mov rax, syscall_id
+    mov rdi, arg1
+    syscall
+}
+
+macro syscall2 syscall_id, arg1, arg2
+{
+    mov rsi, arg2
+    syscall1 syscall_id, arg1
+}
+
+
+macro syscall3 syscall_id, arg1, arg2, arg3
+{
+    mov rdx, arg3
+    syscall2 syscall_id, arg1, arg2
+}
+
+;;;;;;;;;;;;;; syscall macros
+
+macro exit ret_code {
+    mov rax, SYSCALL_EXIT
+    mov rdi, ret_code
+    syscall
+}
+
+macro write fd, msg, msg_len {
+    mov rax, SYSCALL_WRITE
+    mov rdi, fd
+    mov rsi, msg
+    mov rdx, msg_len
+    syscall
+}
+
+;;;;;;;;; networking macros
+
+macro bind sockfd, addr, addr_len {
+    ;;mov rax, SYSCALL_BIND
+    ;;mov rdi, sockfd
+    ;;mov rsi, addr
+    ;;mov rdx, addr_len
+    ;;syscall
+    syscall3 SYSCALL_BIND, sockfd, addr, addr_len
+}
+
+macro close fd {
+    syscall1 SYSCALL_CLOSE, fd
+}
+
+macro listen sockfd, max_connections {
+    syscall2 SYSCALL_LISTEN, sockfd, max_connections
+}
+
+macro socket domain, type, protocol {
+    mov rax, SYSCALL_SOCKET
+    mov rdi, domain
+    mov rsi, type
+    mov rdx, protocol
+    syscall
+}
+
+;;;;;;;;;;;;;; other macros
+
+macro print msg, msg_len {
+    write FILE_STDOUT, msg, msg_len
+    write FILE_STDOUT, str_nl, str_nl_len
+}
+
+macro tcp_socket {
+;; returns dword eax (sockfd)
+    socket SOCKET_DOMAIN_IPV4, SOCKET_TYPE_TCP, 0 ;; only one TCP protocol exists so the last arguments stays at 0
+    cmp rax, 0
+    jge tcp_socket_no_worries
+        exit RET_CODE_TCP_SOCKET_FAIL
+    tcp_socket_no_worries: ;; TODO try and use `$` or something similar so that the macro can be used more than once
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;; code
+
+segment readable executable
+
+entry main
+main:
+    print str_starting_program, str_starting_program_len
+
+    tcp_socket
+    ;; returns dword eax (sockfd)
+
+    mov qword [sockfd], rax
+
+    ;; servaddr.sin_family = AF_INET;
+    mov word [servaddr.sin_family], SOCKET_DOMAIN_IPV4
+
+    ;; servaddr.sin_port = htons(PORT);
+    ;;
+    ;; convert endianness by hand
+    ;; 6969 -(to-hex)-> 0x1b39 -(convert-endianness)-> 0x391b -(to-dec)-> 14619
+    mov word [servaddr.sin_port], 14619
+
+    ;; servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    ;; INADDR_ANY is 0 therefore I give 0 fucks about endianness
+    mov dword [servaddr.sin_addr], 0
+
+    bind [sockfd], servaddr, sizeof_servaddr
+    cmp rax, 0
+    jz bind_is_ok
+        exit RET_CODE_BIND_FAIL
+    bind_is_ok:
+
+    listen [sockfd], MAX_CONNECTIONS
+    cmp rax, 0
+    jz listen_is_ok ;; ЛИСТЕН ЛИСТЕН
+        exit RET_CODE_LISTEN_FAIL
+    listen_is_ok:
+
+    close [sockfd] ;; TODO close on error as well; hint: who cares if you call close on a non-existing socket
+
+    exit RET_CODE_SUCC
+
+;;;;;;;;;;;;;;;;;;;;;;;;; data
+
+segment readable writable
+
+;;;;;;;;;;;;;; "private" data
+
+str_nl db 10 ;; new line character
+str_nl_len = $ - str_nl
+
+;;;;;;;;;;;;;; other data
+
+;;;;;;;; strings
+
+str_starting_program db "starting program"
+str_starting_program_len = $ - str_starting_program
+
+;;str_creating_socket db "creating socket"
+;;str_creating_socket_len = $ - str_creating_socket
+
+;;;;;;;; other
+
+;;sockfd dd 0
+sockfd dq 0 ;; fuck the compiler; fuck tye rules
+
+;; struct sockaddr_in {
+;;     sa_family_t    sin_family;  // 16 bits
+;;     in_port_t      sin_port;    // 16 bits
+;;     struct in_addr sin_addr;    // 32 bits
+;;     uint8_t        sin_zero[8]; // 64 bits
+;; }
+servaddr.sin_family dw 0
+servaddr.sin_port   dd 0
+servaddr.sin_addr   dd 0
+servaddr.sin_zero   dq 0
+sizeof_servaddr = $ - servaddr.sin_family
+servaddr = servaddr.sin_family ;; points to the beginning

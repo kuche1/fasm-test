@@ -338,7 +338,7 @@ receive_header:
 
     method_finished:
 
-    receive_next_byte_from_url: ; TODO this is giga shit but i don't know any better way of doing it
+    receive_next_byte_from_url:
         sys_read [connfd], tmp_1B, tmp_1B.size
         cmp [tmp_1B], ' '
         je url_received
@@ -347,18 +347,16 @@ receive_header:
         mov [url], al
 
         inc [url]
-        inc [url.len] ; TODO check len
+        inc [url.len]
+
+        cmp [url.len], URL_MAXLEN
+        je receive_header_return ; url is too long, abandon ship
+
         jmp receive_next_byte_from_url
     url_received:
 
     mov al, [url.len]
-    unfick_url_ptr:
-        cmp al, 0
-        je url_ptr_unfucked
-        dec [url]
-        dec al
-        jmp url_ptr_unfucked
-    url_ptr_unfucked:
+    sub [url], al
 
     print url, URL_MAXLEN
 
@@ -366,6 +364,7 @@ receive_header:
     sys_read [connfd], header, HEADER_MAXLEN
     print header, HEADER_MAXLEN
 
+    receive_header_return:
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section

@@ -357,8 +357,6 @@ receive_header:
         jmp receive_next_byte_from_url
     url_received:
 
-    mov al, [url.len]
-
     print url, URL_MAXLEN
 
     ; get rest of header so that the browser doesn't get confused

@@ -201,7 +201,7 @@ main:
 
     mov qword [connfd], rax
 
-    write [connfd], str_hello, str_hello_len
+    write [connfd], str_http_response, str_http_response_len
 
     close [connfd]
     close [sockfd] ;; TODO close on error as well; hint: who cares if you call close on a non-existing socket
@@ -227,8 +227,15 @@ str_starting_program_len = $ - str_starting_program
 ;;str_creating_socket db "creating socket"
 ;;str_creating_socket_len = $ - str_creating_socket
 
-str_hello db "hello", 10
-str_hello_len = $ - str_hello
+;;str_hello db "hello", 10
+;;str_hello_len = $ - str_hello
+
+str_http_response db "HTTP/1.1 200 OK", 13, 10
+                  db "Content-Type: text/html; charset=utf-8", 13, 10
+                  db "Connection: close", 13, 10
+                  db 13, 10
+                  db "<h1>Hello from flat asm</h1>", 10
+str_http_response_len = $ - str_http_response
 
 ;;;;;;;; other
 

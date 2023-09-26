@@ -1,6 +1,10 @@
 
 ;; fasm file-transfer.fasm && chmod +x file-transfer && ./file-transfer
 
+; TODO
+;
+; non-blocking IO
+
 ;; info
 ;;
 ;; registers:
@@ -40,9 +44,16 @@
 
 format ELF64 executable
 
+;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: data types
+1byte equ db
+2bytes equ dw
+4bytes equ dd
+8bytes equ dq
+
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: syscall ids
 ;; https://chromium.googlesource.com/chromiumos/docs/+/HEAD/constants/syscalls.md
 
+SYSCALL_READ equ 0
 SYSCALL_WRITE equ 1
 SYSCALL_CLOSE equ 3
 SYSCALL_SOCKET equ 41
@@ -76,6 +87,8 @@ SOCKET_TYPE_TCP equ 1
 
 MAX_CONNECTIONS equ 5
 SERVING_THREADS equ 20
+
+HEADER_MAXLEN equ 1024 ; in bytes
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime variables
 
@@ -117,6 +130,10 @@ macro sys_exit ret_code {
 
 macro sys_fork {
     sys0 SYSCALL_FORK
+}
+
+macro sys_read fd, buf, size {
+    sys3 SYSCALL_READ, fd, buf, size
 }
 
 macro sys_write fd, msg, msg_len {
@@ -256,11 +273,22 @@ serving_thread:
 
     sys_write [connfd], str_http_response, str_http_response_len
 
+    call receive_header
+
     sys_close [connfd]
 
     jmp serving_thread
 
     sys_exit RET_CODE_SUCC
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+receive_header:
+    sys_read [connfd], header, header_maxsize
+
+    print header, header_maxsize 
+
+    ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section
 
@@ -317,3 +345,10 @@ servaddr servaddr_in ;; OMT tova e kato `equ` i `=` (note that moje da dava6 par
 
 cliaddr servaddr_in
 cliaddr_size dd servaddr.size
+
+header 8bytes 0
+rept (HEADER_MAXLEN-1) {
+       8bytes 0
+}
+
+header_maxsize = $ - header

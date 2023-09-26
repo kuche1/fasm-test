@@ -201,6 +201,8 @@ main:
 
     mov qword [connfd], rax
 
+    write [connfd], str_hello, str_hello_len
+
     close [connfd]
     close [sockfd] ;; TODO close on error as well; hint: who cares if you call close on a non-existing socket
 
@@ -224,6 +226,9 @@ str_starting_program_len = $ - str_starting_program
 
 ;;str_creating_socket db "creating socket"
 ;;str_creating_socket_len = $ - str_creating_socket
+
+str_hello db "hello", 10
+str_hello_len = $ - str_hello
 
 ;;;;;;;; other
 

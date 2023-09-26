@@ -217,6 +217,14 @@ str_starting_program_len = $ - str_starting_program
 
 ;;;;;;;; other
 
+struc servaddr_in
+{
+    .sin_family dw 0
+    .sin_port   dd 0
+    .sin_addr   dd 0
+    .sin_zero   dq 0
+}
+
 ;;sockfd dd 0
 sockfd dq 0 ;; fuck the compiler; fuck tye rules
 
@@ -226,9 +234,13 @@ sockfd dq 0 ;; fuck the compiler; fuck tye rules
 ;;     struct in_addr sin_addr;    // 32 bits
 ;;     uint8_t        sin_zero[8]; // 64 bits
 ;; }
-servaddr.sin_family dw 0
-servaddr.sin_port   dd 0
-servaddr.sin_addr   dd 0
-servaddr.sin_zero   dq 0
-sizeof_servaddr = $ - servaddr.sin_family
-servaddr = servaddr.sin_family ;; points to the beginning
+;;
+;;servaddr.sin_family dw 0
+;;servaddr.sin_port   dd 0
+;;servaddr.sin_addr   dd 0
+;;servaddr.sin_zero   dq 0
+;;
+servaddr servaddr_in ;; OMT tova e kato `equ` i `=` (note that moje da dava6 parametri na taq struktura)
+sizeof_servaddr = $ - servaddr
+
+cliaddr servaddr_in

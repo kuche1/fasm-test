@@ -41,6 +41,7 @@
 format ELF64 executable
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: syscall ids
+;; https://chromium.googlesource.com/chromiumos/docs/+/HEAD/constants/syscalls.md
 
 SYSCALL_WRITE equ 1
 SYSCALL_CLOSE equ 3
@@ -64,7 +65,7 @@ RET_CODE_FAIL equ 1
 RET_CODE_TCP_SOCKET_FAIL equ 2
 RET_CODE_BIND_FAIL equ 3
 RET_CODE_LISTEN_FAIL equ 4
-RET_CODE_ACCEPT_FAIL equ 5
+;RET_CODE_ACCEPT_FAIL equ 5 ; no longer used
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: sockets
 

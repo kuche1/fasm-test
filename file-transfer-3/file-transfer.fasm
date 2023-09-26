@@ -76,56 +76,56 @@ MAX_CONNECTIONS equ 5
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: syscalls: shorthands
 
-macro syscall1 syscall_id, arg1 ;; TODO rename to `sys1`
+macro sys1 syscall_id, arg1 ;; TODO rename to `sys1`
 {
     mov rax, syscall_id
     mov rdi, arg1
     syscall
 }
 
-macro syscall2 syscall_id, arg1, arg2
+macro sys2 syscall_id, arg1, arg2
 {
     mov rsi, arg2
-    syscall1 syscall_id, arg1
+    sys1 syscall_id, arg1
 }
 
 
-macro syscall3 syscall_id, arg1, arg2, arg3
+macro sys3 syscall_id, arg1, arg2, arg3
 {
     mov rdx, arg3
-    syscall2 syscall_id, arg1, arg2
+    sys2 syscall_id, arg1, arg2
 }
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: syscalls: generic
 
 macro sys_exit ret_code {
-    syscall1 SYSCALL_EXIT, ret_code
+    sys1 SYSCALL_EXIT, ret_code
 }
 
 macro sys_write fd, msg, msg_len {
-    syscall3 SYSCALL_WRITE, fd, msg, msg_len
+    sys3 SYSCALL_WRITE, fd, msg, msg_len
 }
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: syscalls: networking
 
 macro sys_accept sockfd, addr, addr_len {
-    syscall3 SYSCALL_ACCEPT, sockfd, addr, addr_len
+    sys3 SYSCALL_ACCEPT, sockfd, addr, addr_len
 }
 
 macro sys_bind sockfd, addr, addr_len {
-    syscall3 SYSCALL_BIND, sockfd, addr, addr_len
+    sys3 SYSCALL_BIND, sockfd, addr, addr_len
 }
 
 macro sys_close fd {
-    syscall1 SYSCALL_CLOSE, fd
+    sys1 SYSCALL_CLOSE, fd
 }
 
 macro sys_listen sockfd, max_connections {
-    syscall2 SYSCALL_LISTEN, sockfd, max_connections
+    sys2 SYSCALL_LISTEN, sockfd, max_connections
 }
 
 macro sys_socket domain, type, protocol {
-    syscall3 SYSCALL_SOCKET, domain, type, protocol
+    sys3 SYSCALL_SOCKET, domain, type, protocol
 }
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: other

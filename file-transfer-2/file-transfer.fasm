@@ -180,7 +180,7 @@ main:
     ;; INADDR_ANY is 0 therefore I give 0 fucks about endianness
     mov dword [servaddr.sin_addr], 0
 
-    bind [sockfd], servaddr, sizeof_servaddr
+    bind [sockfd], servaddr, servaddr.size
     cmp rax, 0
     jz bind_is_ok
         exit RET_CODE_BIND_FAIL
@@ -217,17 +217,6 @@ str_starting_program_len = $ - str_starting_program
 
 ;;;;;;;; other
 
-struc servaddr_in
-{
-    .sin_family dw 0
-    .sin_port   dd 0
-    .sin_addr   dd 0
-    .sin_zero   dq 0
-}
-
-;;sockfd dd 0
-sockfd dq 0 ;; fuck the compiler; fuck tye rules
-
 ;; struct sockaddr_in {
 ;;     sa_family_t    sin_family;  // 16 bits
 ;;     in_port_t      sin_port;    // 16 bits
@@ -235,12 +224,23 @@ sockfd dq 0 ;; fuck the compiler; fuck tye rules
 ;;     uint8_t        sin_zero[8]; // 64 bits
 ;; }
 ;;
+struc servaddr_in
+{
+    .sin_family dw 0
+    .sin_port   dd 0
+    .sin_addr   dd 0
+    .sin_zero   dq 0
+    .size = .sin_family - $ ;; not really part of the struct; just an asm thing
+}
+
+;;sockfd dd 0
+sockfd dq 0 ;; fuck the compiler; fuck tye rules
+
 ;;servaddr.sin_family dw 0
 ;;servaddr.sin_port   dd 0
 ;;servaddr.sin_addr   dd 0
 ;;servaddr.sin_zero   dq 0
 ;;
 servaddr servaddr_in ;; OMT tova e kato `equ` i `=` (note that moje da dava6 parametri na taq struktura)
-sizeof_servaddr = $ - servaddr
 
 cliaddr servaddr_in

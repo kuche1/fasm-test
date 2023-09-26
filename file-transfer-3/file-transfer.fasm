@@ -305,8 +305,6 @@ serving_thread:
 
     mov qword [connfd], rax
 
-    sys_write [connfd], str_http_response, str_http_response_len
-
     call receive_header
 
     sys_close [connfd]
@@ -362,9 +360,23 @@ receive_header:
 
     ; get rest of header so that the browser doesn't get confused
     sys_read [connfd], header, HEADER_MAXLEN
-    print header, HEADER_MAXLEN
+    ; print header, HEADER_MAXLEN
+
+    call handle_request
 
     receive_header_return:
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+handle_request:
+
+    sys_write [connfd], str_http_response, str_http_response_len
+
+    ; cmp [url.len] 1
+    ; cmp [url.len] 2
+    ; cmp [url.len] 3
+
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section
@@ -443,5 +455,4 @@ url 1B 0
 rept (URL_MAXLEN-1) {
        1B 0
 }
-
 url.len 1B 0

@@ -336,15 +336,19 @@ receive_header:
 
     method_finished:
 
+    mov rcx, url
+
     receive_next_byte_from_url:
+        push rcx ; TODO stupid
         sys_read [connfd], tmp_1B, tmp_1B.size
+        pop rcx
         cmp [tmp_1B], ' '
         je url_received
 
         mov al, [tmp_1B]
-        mov [url], al
+        mov [rcx], al
 
-        inc [url]
+        inc rcx
         inc [url.len]
 
         cmp [url.len], URL_MAXLEN
@@ -354,7 +358,6 @@ receive_header:
     url_received:
 
     mov al, [url.len]
-    sub [url], al
 
     print url, URL_MAXLEN
 
@@ -371,12 +374,55 @@ receive_header:
 
 handle_request:
 
-    sys_write [connfd], str_http_response, str_http_response_len
+    call send_http_headers
 
-    ; cmp [url.len] 1
-    ; cmp [url.len] 2
-    ; cmp [url.len] 3
+    cmp [url.len], 1
+    je requested_page_main
 
+    cmp [url.len], 2
+    je requested_page_download
+
+    ; cmp [url.len], 3
+    ; je requested_page_upload
+    jmp requested_page_upload
+
+    requested_page_main:
+        call handle_page_main
+        jmp handle_request_return
+
+    requested_page_download:
+        call handle_page_download
+        jmp handle_request_return
+
+    requested_page_upload:
+        call handle_page_upload
+        jmp handle_request_return
+
+    handle_request_return:
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+send_http_headers:
+    sys_write [connfd], str_http_headers, str_http_headers.size
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+handle_page_main:
+    sys_write [connfd], str_html_page_main, str_html_page_main.size
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+handle_page_download:
+    sys_write [connfd], str_html_page_download, str_html_page_download.size
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+handle_page_upload:
+    sys_write [connfd], str_html_page_upload, str_html_page_upload.size
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section
@@ -410,12 +456,20 @@ str_starting_program_len = $ - str_starting_program
 ;;str_hello db "hello", 10
 ;;str_hello_len = $ - str_hello
 
-str_http_response db "HTTP/1.1 200 OK", 13, 10
-                  db "Content-Type: text/html; charset=utf-8", 13, 10
-                  db "Connection: close", 13, 10
-                  db 13, 10
-                  db "<h1>Hello from flat asm</h1>", 10
-str_http_response_len = $ - str_http_response
+str_http_headers db "HTTP/1.1 200 OK", 13, 10
+                 db "Content-Type: text/html; charset=utf-8", 13, 10
+                 db "Connection: close", 13, 10
+                 db 13, 10
+str_http_headers.size = $ - str_http_headers
+
+str_html_page_main db "<h1>Hello from flat asm</h1>", 10
+str_html_page_main.size = $ - str_html_page_main
+
+str_html_page_download db "<h1>download page</h1>", 10
+str_html_page_download.size = $ - str_html_page_download
+
+str_html_page_upload db "<h1>upload page</h1>", 10
+str_html_page_upload.size = $ - str_html_page_upload
 
 ;;;;;;;; other
 

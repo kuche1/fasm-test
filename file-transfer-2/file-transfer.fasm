@@ -193,6 +193,7 @@ main:
         exit RET_CODE_LISTEN_FAIL
     listen_is_ok:
 
+accept_next_client_loop:
     accept [sockfd], cliaddr, cliaddr_size
     cmp rax, 0
     jg accept_is_ok
@@ -204,6 +205,9 @@ main:
     write [connfd], str_http_response, str_http_response_len
 
     close [connfd]
+
+    jmp accept_next_client_loop
+    
     close [sockfd] ;; TODO close on error as well; hint: who cares if you call close on a non-existing socket
 
     exit RET_CODE_SUCC

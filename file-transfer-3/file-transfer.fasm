@@ -48,6 +48,7 @@ SYSCALL_SOCKET equ 41
 SYSCALL_ACCEPT equ 43
 SYSCALL_BIND equ 49
 SYSCALL_LISTEN equ 50
+SYSCALL_FORK equ 57
 SYSCALL_EXIT equ 60
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: files
@@ -73,14 +74,25 @@ SOCKET_TYPE_TCP equ 1
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: server parameters
 
 MAX_CONNECTIONS equ 5
+SERVING_THREADS equ 20
+
+;;;;;;;;;;;;;;;;;;;;;;;;; comptime variables
+
+;; TODO create lbl_id
+;; then use lbl_id+=1 where called
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: syscalls: shorthands
 
-macro sys1 syscall_id, arg1
+macro sys0 syscall_id
 {
     mov rax, syscall_id
-    mov rdi, arg1
     syscall
+}
+
+macro sys1 syscall_id, arg1
+{
+    mov rdi, arg1
+    sys0 syscall_id
 }
 
 macro sys2 syscall_id, arg1, arg2
@@ -100,6 +112,10 @@ macro sys3 syscall_id, arg1, arg2, arg3
 
 macro sys_exit ret_code {
     sys1 SYSCALL_EXIT, ret_code
+}
+
+macro sys_fork {
+    sys0 SYSCALL_FORK
 }
 
 macro sys_write fd, msg, msg_len {
@@ -149,6 +165,9 @@ macro create_tcp_socket {
 segment readable executable
 
 entry main
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
 main:
     print str_starting_program, str_starting_program_len
 
@@ -164,7 +183,8 @@ main:
     ;;
     ;; convert endianness by hand
     ;; 6969 -(to-hex)-> 0x1b39 -(convert-endianness)-> 0x391b -(to-dec)-> 14619
-    mov word [servaddr.sin_port], 14619
+    ;;mov word [servaddr.sin_port], 14619
+    mov word [servaddr.sin_port], 14875
 
     ;; servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     ;; INADDR_ANY is 0 therefore I give 0 fucks about endianness
@@ -182,23 +202,62 @@ main:
         sys_exit RET_CODE_LISTEN_FAIL
     listen_is_ok:
 
-    accept_next_client_loop:
-
-        sys_accept [sockfd], cliaddr, cliaddr_size
+    rept SERVING_THREADS counter {
+        sys_fork
         cmp rax, 0
-        jg accept_is_ok
-            sys_exit RET_CODE_ACCEPT_FAIL
-        accept_is_ok:
+        jnz is_parent_#counter
+            ;; is child
+            jmp serving_thread
+        is_parent_#counter:
+    }
 
-        mov qword [connfd], rax
+    bullshit:
+    jmp bullshit
 
-        sys_write [connfd], str_http_response, str_http_response_len
+    ; accept_next_client_loop:
 
-        sys_close [connfd]
+    ;     sys_accept [sockfd], cliaddr, cliaddr_size
+    ;     cmp rax, 0
+    ;     jg accept_is_ok
+    ;         ;;sys_exit RET_CODE_ACCEPT_FAIL
+            
+    ;         ;; client is a piece of shit
+    ;         jmp accept_next_client_loop
+    ;     accept_is_ok:
 
-    jmp accept_next_client_loop
-    
+    ;     mov qword [connfd], rax
+
+    ;     sys_fork
+    ;     cmp rax, 0
+    ;     jnz is_parent
+    ;         ;; is child
+    ;         jmp serving_thread
+    ;     is_parent:
+
+    ; jmp accept_next_client_loop
+
     sys_close [sockfd] ;; TODO close on error as well; hint: who cares if you call close on a non-existing socket
+
+    sys_exit RET_CODE_SUCC
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+serving_thread:
+
+    sys_accept [sockfd], cliaddr, cliaddr_size
+    cmp rax, 0
+    jg accept_is_ok
+        ;; client is a piece of shit
+        jmp serving_thread
+    accept_is_ok:
+
+    mov qword [connfd], rax
+
+    sys_write [connfd], str_http_response, str_http_response_len
+
+    sys_close [connfd]
+
+    jmp serving_thread
 
     sys_exit RET_CODE_SUCC
 

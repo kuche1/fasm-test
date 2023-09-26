@@ -76,7 +76,7 @@ MAX_CONNECTIONS equ 5
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: syscalls: shorthands
 
-macro sys1 syscall_id, arg1 ;; TODO rename to `sys1`
+macro sys1 syscall_id, arg1
 {
     mov rax, syscall_id
     mov rdi, arg1
@@ -182,18 +182,19 @@ main:
         sys_exit RET_CODE_LISTEN_FAIL
     listen_is_ok:
 
-accept_next_client_loop:
-    sys_accept [sockfd], cliaddr, cliaddr_size
-    cmp rax, 0
-    jg accept_is_ok
-        sys_exit RET_CODE_ACCEPT_FAIL
-    accept_is_ok:
+    accept_next_client_loop:
 
-    mov qword [connfd], rax
+        sys_accept [sockfd], cliaddr, cliaddr_size
+        cmp rax, 0
+        jg accept_is_ok
+            sys_exit RET_CODE_ACCEPT_FAIL
+        accept_is_ok:
 
-    sys_write [connfd], str_http_response, str_http_response_len
+        mov qword [connfd], rax
 
-    sys_close [connfd]
+        sys_write [connfd], str_http_response, str_http_response_len
+
+        sys_close [connfd]
 
     jmp accept_next_client_loop
     

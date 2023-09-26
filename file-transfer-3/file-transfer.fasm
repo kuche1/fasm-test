@@ -3,7 +3,7 @@
 
 ; TODO
 ;
-; non-blocking IO
+; non-blocking IO and check ret code
 
 ;; info
 ;;
@@ -45,6 +45,7 @@
 format ELF64 executable
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: data types
+
 1B equ db
 2B equ dw
 4B equ dd
@@ -93,8 +94,12 @@ SO_REUSEPORT equ 15
 
 MAX_CONNECTIONS equ 5
 SERVING_THREADS equ 20
+HEADER_MAXLEN equ 1024
 
-HEADER_MAXLEN equ 1024 ; in bytes
+;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: idkman
+
+METHOD_GET equ 0
+METHOD_POST equ 1
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime variables
 
@@ -312,9 +317,27 @@ serving_thread:
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 receive_header:
-    sys_read [connfd], header, HEADER_MAXLEN
 
-    print header, HEADER_MAXLEN
+    sys_read [connfd], tmp_4B, tmp_4B.size
+
+    ; print tmp_4B, tmp_4B.size
+
+    cmp [tmp_4B], 'G'
+    je method_get ; assume GET
+    jmp method_post ; assume POST
+
+    method_get:
+        mov [method], METHOD_GET
+        jmp method_finished
+
+    method_post:
+        sys_read [connfd], tmp_1B, tmp_1B.size ; get rid of ` `
+        mov [method], METHOD_POST
+        jmp method_finished
+
+    method_finished:
+
+    sys_read [connfd], header, HEADER_MAXLEN
 
     ret
 
@@ -322,13 +345,19 @@ receive_header:
 
 segment readable writable
 
-;;;;;;;;;;;;;; "private" data
+;;;;;;;;;;;;;; "generic" data
 
 str_nl db 10 ;; new line character
 str_nl_len = $ - str_nl
 
 one 4B 1
 sizeof_one = $ - one
+
+tmp_1B 1B 0
+tmp_1B.size = $ - tmp_1B
+
+tmp_4B 1B 0,0,0,0
+tmp_4B.size = $ - tmp_4B
 
 ;;;;;;;;;;;;;; other data
 
@@ -376,6 +405,8 @@ servaddr servaddr_in ;; OMT tova e kato `equ` i `=` (note that moje da dava6 par
 
 cliaddr servaddr_in
 cliaddr_size dd servaddr.size
+
+method 1B 0
 
 header 1B 0
 rept (HEADER_MAXLEN-1) {

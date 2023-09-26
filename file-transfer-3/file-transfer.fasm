@@ -45,10 +45,10 @@
 format ELF64 executable
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: data types
-1byte equ db
-2bytes equ dw
-4bytes equ dd
-8bytes equ dq
+1B equ db
+2B equ dw
+4B equ dd
+8B equ dq
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: syscall ids
 ;; https://chromium.googlesource.com/chromiumos/docs/+/HEAD/constants/syscalls.md
@@ -60,6 +60,7 @@ SYSCALL_SOCKET equ 41
 SYSCALL_ACCEPT equ 43
 SYSCALL_BIND equ 49
 SYSCALL_LISTEN equ 50
+SYSCALL_SETSOCKOPT equ 54
 SYSCALL_FORK equ 57
 SYSCALL_EXIT equ 60
 
@@ -77,11 +78,16 @@ RET_CODE_TCP_SOCKET_FAIL equ 2
 RET_CODE_BIND_FAIL equ 3
 RET_CODE_LISTEN_FAIL equ 4
 ;RET_CODE_ACCEPT_FAIL equ 5 ; no longer used
+RET_CODE_SETSOCKOPT_FAIL equ 6
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: sockets
 
 SOCKET_DOMAIN_IPV4 equ 2
 SOCKET_TYPE_TCP equ 1
+
+SOL_SOCKET equ 1
+SO_REUSEADDR equ 2
+SO_REUSEPORT equ 15
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: server parameters
 
@@ -122,6 +128,18 @@ macro sys3 syscall_id, arg1, arg2, arg3
     sys2 syscall_id, arg1, arg2
 }
 
+macro sys4 syscall_id, arg1, arg2, arg3, arg4
+{
+    mov r10, arg4
+    sys3 syscall_id, arg1, arg2, arg3
+}
+
+macro sys5 syscall_id, arg1, arg2, arg3, arg4, arg5
+{
+    mov r8, arg5
+    sys4 syscall_id, arg1, arg2, arg3, arg4
+}
+
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: syscalls: generic
 
 macro sys_exit ret_code {
@@ -134,6 +152,10 @@ macro sys_fork {
 
 macro sys_read fd, buf, size {
     sys3 SYSCALL_READ, fd, buf, size
+}
+
+macro sys_setsockopt fd, level, optname, optval, optlen {
+    sys5 SYSCALL_SETSOCKOPT, fd, level, optname, optval, optlen
 }
 
 macro sys_write fd, msg, msg_len {
@@ -193,6 +215,12 @@ main:
     ;; returns: dword eax: sockfd
 
     mov qword [sockfd], rax
+
+    sys_setsockopt [sockfd], SOL_SOCKET, SO_REUSEPORT, one, sizeof_one
+    cmp rax, 0
+    jge setsockopt_ok
+        sys_exit RET_CODE_SETSOCKOPT_FAIL
+    setsockopt_ok:
 
     ;; servaddr.sin_family = AF_INET;
     mov word [servaddr.sin_family], SOCKET_DOMAIN_IPV4
@@ -284,9 +312,9 @@ serving_thread:
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 receive_header:
-    sys_read [connfd], header, header_maxsize
+    sys_read [connfd], header, HEADER_MAXLEN
 
-    print header, header_maxsize 
+    print header, HEADER_MAXLEN
 
     ret
 
@@ -298,6 +326,9 @@ segment readable writable
 
 str_nl db 10 ;; new line character
 str_nl_len = $ - str_nl
+
+one 4B 1
+sizeof_one = $ - one
 
 ;;;;;;;;;;;;;; other data
 
@@ -346,9 +377,7 @@ servaddr servaddr_in ;; OMT tova e kato `equ` i `=` (note that moje da dava6 par
 cliaddr servaddr_in
 cliaddr_size dd servaddr.size
 
-header 8bytes 0
+header 1B 0
 rept (HEADER_MAXLEN-1) {
-       8bytes 0
+       1B 0
 }
-
-header_maxsize = $ - header

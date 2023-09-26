@@ -94,7 +94,8 @@ SO_REUSEPORT equ 15
 
 MAX_CONNECTIONS equ 5
 SERVING_THREADS equ 20
-HEADER_MAXLEN equ 1024
+HEADER_MAXLEN equ 1024 ; in bytes
+URL_MAXLEN equ 128 ; in bytes
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: idkman
 
@@ -337,7 +338,33 @@ receive_header:
 
     method_finished:
 
+    receive_next_byte_from_url: ; TODO this is giga shit but i don't know any better way of doing it
+        sys_read [connfd], tmp_1B, tmp_1B.size
+        cmp [tmp_1B], ' '
+        je url_received
+
+        mov al, [tmp_1B]
+        mov [url], al
+
+        inc [url]
+        inc [url.len] ; TODO check len
+        jmp receive_next_byte_from_url
+    url_received:
+
+    mov al, [url.len]
+    unfick_url_ptr:
+        cmp al, 0
+        je url_ptr_unfucked
+        dec [url]
+        dec al
+        jmp url_ptr_unfucked
+    url_ptr_unfucked:
+
+    print url, URL_MAXLEN
+
+    ; get rest of header so that the browser doesn't get confused
     sys_read [connfd], header, HEADER_MAXLEN
+    print header, HEADER_MAXLEN
 
     ret
 
@@ -412,3 +439,10 @@ header 1B 0
 rept (HEADER_MAXLEN-1) {
        1B 0
 }
+
+url 1B 0
+rept (URL_MAXLEN-1) {
+       1B 0
+}
+
+url.len 1B 0

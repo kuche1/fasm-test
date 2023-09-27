@@ -59,6 +59,7 @@ SYSCALL_WRITE equ 1
 SYSCALL_CLOSE equ 3
 SYSCALL_SOCKET equ 41
 SYSCALL_ACCEPT equ 43
+SYSCALL_SHUTDOWN equ 48
 SYSCALL_BIND equ 49
 SYSCALL_LISTEN equ 50
 SYSCALL_SETSOCKOPT equ 54
@@ -89,6 +90,10 @@ SOCKET_TYPE_TCP equ 1
 SOL_SOCKET equ 1
 SO_REUSEADDR equ 2
 SO_REUSEPORT equ 15
+
+SHUTDOWN_READ equ 0
+SHUTDOWN_WRITE equ 1
+SHUTDOWN_READ_AND_WRITE equ 2
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: server parameters
 
@@ -164,6 +169,10 @@ macro sys_setsockopt fd, level, optname, optval, optlen {
     sys5 SYSCALL_SETSOCKOPT, fd, level, optname, optval, optlen
 }
 
+macro sys_shutdown socket, how {
+    sys2 SYSCALL_SHUTDOWN, socket, how
+}
+
 macro sys_write fd, msg, msg_len {
     sys3 SYSCALL_WRITE, fd, msg, msg_len
 }
@@ -235,8 +244,8 @@ main:
     ;;
     ;; convert endianness by hand
     ;; 6969 -(to-hex)-> 0x1b39 -(convert-endianness)-> 0x391b -(to-dec)-> 14619
-    ;;mov word [servaddr.sin_port], 14619
-    mov word [servaddr.sin_port], 14875
+    mov word [servaddr.sin_port], 14619
+    ;;mov word [servaddr.sin_port], 14875
 
     ;; servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     ;; INADDR_ANY is 0 therefore I give 0 fucks about endianness
@@ -288,6 +297,7 @@ main:
 
     ; jmp accept_next_client_loop
 
+    sys_shutdown [sockfd], SHUTDOWN_READ_AND_WRITE
     sys_close [sockfd] ;; TODO close on error as well; hint: who cares if you call close on a non-existing socket
 
     sys_exit RET_CODE_SUCC
@@ -307,6 +317,7 @@ serving_thread:
 
     call receive_header
 
+    sys_shutdown [connfd], SHUTDOWN_READ_AND_WRITE
     sys_close [connfd]
 
     jmp serving_thread

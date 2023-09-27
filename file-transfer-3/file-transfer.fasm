@@ -99,8 +99,9 @@ SHUTDOWN_READ_AND_WRITE equ 2
 
 MAX_CONNECTIONS equ 5
 SERVING_THREADS equ 20
-HEADER_MAXLEN equ 1024 ; in bytes
+HEADER_MAXLEN equ 2048 ; in bytes
 URL_MAXLEN equ 128 ; in bytes
+HEADER_LINE_MAXLEN equ 128 ; in bytes
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: idkman
 
@@ -348,6 +349,7 @@ receive_header:
     method_finished:
 
     mov rcx, url
+    mov [url.len], 0
 
     receive_next_byte_from_url:
         push rcx ; TODO stupid
@@ -368,15 +370,64 @@ receive_header:
         jmp receive_next_byte_from_url
     url_received:
 
-    print url, URL_MAXLEN
+    print url, URL_MAXLEN ; TODO use `url.len`; same goes for all such cases
+
+    call read_next_header_line
+    print header_line, HEADER_MAXLEN
 
     ; get rest of header so that the browser doesn't get confused
     sys_read [connfd], header, HEADER_MAXLEN
-    ; print header, HEADER_MAXLEN
+    print header, HEADER_MAXLEN
 
     call handle_request
 
     receive_header_return:
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+read_next_header_line:
+    
+    mov rax, header_line
+    push rax
+
+    mov [header_line.len], 0
+
+    sys_read [connfd], tmp_1B_a, tmp_1B_a.size
+    
+    read_next_header_line.loop:
+
+        sys_read [connfd], tmp_1B_b, tmp_1B_b.size
+
+        cmp [tmp_1B_b], 10 ; \n
+        jne read_next_header_line.read_next_byte
+        cmp [tmp_1B_a], 13 ; \r
+        jne read_next_header_line.read_next_byte
+
+        jmp read_next_header_line.line_done
+
+        read_next_header_line.read_next_byte:
+
+        pop rax
+        mov cl, [tmp_1B_a]
+        mov [rax], cl
+        inc rax
+        push rax
+
+        inc [header_line.len]
+
+        cmp [header_line.len], HEADER_LINE_MAXLEN
+        je read_next_header_line.line_done ; TODO ideally we would discard the rest of the line
+
+        mov al, [tmp_1B_b]
+        mov [tmp_1B_a], al
+
+        jmp read_next_header_line.loop
+    
+    read_next_header_line.line_done:
+
+    pop rax
+
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
@@ -390,6 +441,9 @@ handle_request:
 
     cmp [url.len], 3
     je requested_page_upload
+
+    cmp [url.len], 4
+    je requested_script_file_upload
 
     jmp requested_page_main
 
@@ -432,6 +486,11 @@ handle_page_upload:
     sys_write [connfd], str_html_page_upload, str_html_page_upload.size
     ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+requested_script_file_upload:
+    ret
+
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section
 
 segment readable writable
@@ -447,6 +506,12 @@ sizeof_one = $ - one
 tmp_1B 1B 0
 tmp_1B.size = $ - tmp_1B
 
+tmp_1B_a 1B 0
+tmp_1B_a.size = $ - tmp_1B_a
+
+tmp_1B_b 1B 0
+tmp_1B_b.size = $ - tmp_1B_b
+
 tmp_4B 1B 0,0,0,0
 tmp_4B.size = $ - tmp_4B
 
@@ -459,9 +524,6 @@ str_starting_program_len = $ - str_starting_program
 
 ;;str_creating_socket db "creating socket"
 ;;str_creating_socket_len = $ - str_creating_socket
-
-;;str_hello db "hello", 10
-;;str_hello_len = $ - str_hello
 
 str_http_headers db "HTTP/1.1 200 OK", 13, 10
                  db "Content-Type: text/html; charset=utf-8", 13, 10
@@ -486,7 +548,7 @@ str_html_page_main.size = $ - str_html_page_main
 ; str_html_page_download db "<h1>download page</h1>", 10
 str_html_page_download db "<!DOCTYPE html>", 10
     db "<html>", 10
-    db '<form action="/script_file_upload" method="post" enctype="multipart/form-data">', 10
+    db '<form action="/sup" method="post" enctype="multipart/form-data">', 10
     db '  <label for="file">File</label>', 10
     db '  <input id="file" name="file" type="file" />', 10
     db "  <button>Upload</button>", 10
@@ -542,3 +604,9 @@ rept (URL_MAXLEN-1) {
        1B 0
 }
 url.len 1B 0
+
+header_line 1B 0
+rept (HEADER_LINE_MAXLEN-1) {
+       1B 0
+}
+header_line.len 1B 0

@@ -382,6 +382,11 @@ receive_header:
 
     call read_rest_of_header
 
+    ; len would be 0 if it was not found
+    mov rdx, 0
+    mov dl, [multipart_boundary.len]
+    print multipart_boundary, rdx
+
     call handle_request
 
     receive_header_return:
@@ -390,6 +395,8 @@ receive_header:
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 read_rest_of_header:
+
+    mov [multipart_boundary.len], 0
 
     .read_next_line:
 
@@ -401,6 +408,67 @@ read_rest_of_header:
 
         cmp [header_line.len], 0
         je .return
+
+        ; check for the multipart boundary
+
+        mov dl, str_header_line_multipart_boundary.size
+        mov dh, [header_line.len]
+
+        ; received line is too short
+        cmp dh, dl
+        jle .read_next_line
+
+        ; compare strings
+
+        mov rax, str_header_line_multipart_boundary
+        mov rbx, header_line
+
+        .compare_next_char:
+
+            cmp dl, 0
+            je .found_boundary_line
+
+            ; read char from expected multipart
+            mov cl, [rax]
+            inc rax
+
+            ; read char from received line
+            mov ch, [rbx]
+            inc rbx
+
+            ; see if they're the same
+            cmp cl, ch
+            jne .read_next_line
+
+            dec dl
+
+        jmp .compare_next_char
+
+        .found_boundary_line:
+
+            mov rax, multipart_boundary
+
+            mov dl, str_header_line_multipart_boundary.size
+            mov dh, [header_line.len]
+
+            sub dh, dl
+            mov [multipart_boundary.len], dh
+
+            .copy_boundary:
+
+                cmp dh, 0
+                je .read_next_line    
+
+                ; copy
+                mov ch, [rbx]
+                inc rbx
+
+                mov [rax], ch
+                inc rax
+
+                dec dh
+            
+            jmp .copy_boundary
 
     jmp .read_next_line
     

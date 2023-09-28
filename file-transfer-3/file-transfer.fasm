@@ -99,7 +99,6 @@ SHUTDOWN_READ_AND_WRITE equ 2
 
 MAX_CONNECTIONS equ 5
 SERVING_THREADS equ 20
-HEADER_MAXLEN equ 2048 ; in bytes
 URL_MAXLEN equ 128 ; in bytes
 HEADER_LINE_MAXLEN equ 128 ; in bytes
 
@@ -216,6 +215,35 @@ macro create_tcp_socket {
     tcp_socket_ok: ;; TODO try and use `$` or something similar so that the macro can be used more than once
 }
 
+; macro are_strings_equal str1, len1, str2, len2, label_if_equal, label_if_not_equal {
+;     mov dl, len1
+;     mov dh, len2
+
+;     cmp dl, dh
+;     jne label_if_not_equal
+
+;     mov rax, str1
+;     mov rbx, str2
+
+;     string_compare_loop: ; TODO see https://board.flatassembler.net/topic.php?t=7344
+
+;         cmp dl, 0
+;         je label_if_equal
+
+;         mov cl, [rax]
+;         inc rax
+
+;         mov ch, [rbx]
+;         inc rbx
+
+;         cmp cl, ch
+;         jne label_if_not_equal
+
+;         dec dl
+
+;     jmp string_compare_loop
+; }
+
 ;;;;;;;;;;;;;;;;;;;;;;;;; code section
 
 segment readable executable
@@ -276,30 +304,8 @@ main:
     bullshit:
     jmp bullshit
 
-    ; accept_next_client_loop:
-
-    ;     sys_accept [sockfd], cliaddr, cliaddr_size
-    ;     cmp rax, 0
-    ;     jg accept_is_ok
-    ;         ;;sys_exit RET_CODE_ACCEPT_FAIL
-            
-    ;         ;; client is a piece of shit
-    ;         jmp accept_next_client_loop
-    ;     accept_is_ok:
-
-    ;     mov qword [connfd], rax
-
-    ;     sys_fork
-    ;     cmp rax, 0
-    ;     jnz is_parent
-    ;         ;; is child
-    ;         jmp serving_thread
-    ;     is_parent:
-
-    ; jmp accept_next_client_loop
-
     sys_shutdown [sockfd], SHUTDOWN_READ_AND_WRITE
-    sys_close [sockfd] ;; TODO close on error as well; hint: who cares if you call close on a non-existing socket
+    sys_close [sockfd]
 
     sys_exit RET_CODE_SUCC
 
@@ -370,19 +376,87 @@ receive_header:
         jmp receive_next_byte_from_url
     url_received:
 
-    print url, URL_MAXLEN ; TODO use `url.len`; same goes for all such cases
+    mov rdx, 0
+    mov dl, [url.len]
+    print url, rdx
 
-    call read_next_header_line
-    print header_line, HEADER_MAXLEN
-
-    ; get rest of header so that the browser doesn't get confused
-    sys_read [connfd], header, HEADER_MAXLEN
-    print header, HEADER_MAXLEN
+    call read_rest_of_header
 
     call handle_request
 
     receive_header_return:
     ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+read_rest_of_header:
+
+    .read_next_line:
+
+        call read_next_header_line
+
+        mov rdx, 0
+        mov dl, [header_line.len]
+        print header_line, rdx
+
+        cmp [header_line.len], 0
+        je .return
+
+    jmp .read_next_line
+    
+    .return:
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+; save_header_line_content_type_boundary:
+;     save_header_line_content_type_boundary.begin_again:
+
+;     call read_next_header_line
+
+;     cmp [header_line.len], 0
+;     je save_header_line_content_type_boundary.ret
+
+;     are_strings_equal \
+;         str_header_line_content_type_containing_boundary, \
+;         str_header_line_content_type_containing_boundary.size, \
+;         header_line, \
+;         str_header_line_content_type_containing_boundary.size, \
+;         save_header_line_content_type_boundary.found, \
+;         save_header_line_content_type_boundary.begin_again
+
+;     save_header_line_content_type_boundary.found:
+
+;     ; mov rax, header_line
+;     ; add rax, str_header_line_content_type_containing_boundary.size
+
+;     ; mov bl, [header_line.len]
+;     ; sub bl, str_header_line_content_type_containing_boundary.size
+
+;     ; mov bh, bl ; save length for later
+
+;     ; mov rcx, multipart_boundary
+
+;     ; ; TODO now copy the rest to the `multipart_boundary` buf
+;     ; save_header_line_content_type_boundary.copy_loop:
+;     ;     cmp bl, 0
+;     ;     je .copy_done ; TODO hopefully this work as a local label
+
+;     ;     mov bh, [rax] ; read byte to bh
+;     ;     inc rax
+
+;     ;     mov [rdx], bh ; put byte in `multipart_boundary`
+;     ;     inc rdx
+
+;     ;     dec bl
+    
+;     ;     jmp save_header_line_content_type_boundary.copy_loop
+;     ; .copy_done:
+
+;     ; mov [multipart_boundary.len], bh
+
+;     save_header_line_content_type_boundary.ret:
+;     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
@@ -565,6 +639,9 @@ str_html_page_upload db "<!DOCTYPE html>", 10
     db "</html>", 10
 str_html_page_upload.size = $ - str_html_page_upload
 
+str_header_line_multipart_boundary db "Content-Type: multipart/form-data; boundary="
+str_header_line_multipart_boundary.size = $ - str_header_line_multipart_boundary
+
 ;;;;;;;; other
 
 ;; struct sockaddr_in {
@@ -594,10 +671,12 @@ cliaddr_size dd servaddr.size
 
 method 1B 0
 
-header 1B 0
-rept (HEADER_MAXLEN-1) {
+
+header_line 1B 0
+rept (HEADER_LINE_MAXLEN-1) {
        1B 0
 }
+header_line.len 1B 0
 
 url 1B 0
 rept (URL_MAXLEN-1) {
@@ -605,8 +684,8 @@ rept (URL_MAXLEN-1) {
 }
 url.len 1B 0
 
-header_line 1B 0
+multipart_boundary 1B 0
 rept (HEADER_LINE_MAXLEN-1) {
-       1B 0
+    1B 0
 }
-header_line.len 1B 0
+multipart_boundary.len 1B 0

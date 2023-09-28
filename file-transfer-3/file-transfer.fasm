@@ -120,7 +120,9 @@ S_IWUSR equ 128
 S_IRGRP equ 32
 S_IROTH equ 4
 
+SEEK_SET equ 0
 SEEK_CUR equ 1
+SEEK_END equ 2
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: server parameters
 
@@ -374,7 +376,7 @@ main:
         sys_exit RET_CODE_LISTEN_FAIL
     listen_is_ok:
 
-    rept SERVING_THREADS counter {
+    rept (SERVING_THREADS-1) counter {
         sys_fork
         cmp rax, 0
         jnz is_parent_#counter
@@ -383,10 +385,7 @@ main:
         is_parent_#counter:
     }
 
-    bullshit:
-    jmp bullshit
-
-    ; jmp serving_thread
+    jmp serving_thread ; also use main thread to serve
 
     sys_shutdown [sockfd], SHUTDOWN_READ_AND_WRITE
     sys_close [sockfd]
@@ -575,7 +574,7 @@ read_next_header_line:
 
 handle_request:
 
-    call send_http_headers
+    sys_write [connfd], str_http_header_begin, str_http_header_begin.size
 
     cmp [url.len], 2
     je .requested_page_download
@@ -616,31 +615,29 @@ handle_request:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
-send_http_headers:
-    sys_write [connfd], str_http_headers, str_http_headers.size
-    ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;; fnc
-
 handle_page_main:
+    sys_write [connfd], str_http_header_end, str_http_header_end.size
     sys_write [connfd], str_html_page_main, str_html_page_main.size
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 handle_page_download:
+    sys_write [connfd], str_http_header_end, str_http_header_end.size
     sys_write [connfd], str_html_page_download, str_html_page_download.size
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 handle_page_upload:
+    sys_write [connfd], str_http_header_end, str_http_header_end.size
     sys_write [connfd], str_html_page_upload, str_html_page_upload.size
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 handle_script_file_upload:
+    sys_write [connfd], str_http_header_end, str_http_header_end.size
 
     call read_rest_of_header
 
@@ -708,6 +705,27 @@ handle_script_file_upload:
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 handle_script_file_download:
+
+    sys_write [connfd], str_http_header_attachment, str_http_header_attachment.size
+    sys_write [connfd], str_http_header_end, str_http_header_end.size
+
+    mov rsi, O_RDONLY
+
+    sys_open path_file_send_upload_to, rsi, 0
+    mov [file_send_upload_fd], rax
+    
+    ; get file size
+    sys_lseek [file_send_upload_fd], 0, SEEK_END
+    mov [tmp_8B], rax
+
+    ; go back to the start
+    sys_lseek [file_send_upload_fd], 0, SEEK_SET
+
+    ; TODO call this in a loop
+    sys_sendfile [connfd], [file_send_upload_fd], 0, [tmp_8B]
+
+    sys_close [file_send_upload_fd]
+
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section
@@ -744,14 +762,23 @@ tmp_8B.size = $ - tmp_8B
 str_starting_program db "starting program"
 str_starting_program_len = $ - str_starting_program
 
-;;str_creating_socket db "creating socket"
-;;str_creating_socket_len = $ - str_creating_socket
+; not ideal but why not; avoid some complexity for now
+str_http_header_begin db "HTTP/1.1 200 OK", 13, 10
+                      db "Content-Type: text/html; charset=utf-8", 13, 10
+                      db "Connection: close", 13, 10
+str_http_header_begin.size = $ - str_http_header_begin
 
-str_http_headers db "HTTP/1.1 200 OK", 13, 10
-                 db "Content-Type: text/html; charset=utf-8", 13, 10
-                 db "Connection: close", 13, 10
-                 db 13, 10
-str_http_headers.size = $ - str_http_headers
+str_http_header_attachment db 'Content-disposition: attachment; filename="gucci-file.bin"', 13, 10
+str_http_header_attachment.size = $ - str_http_header_attachment
+
+str_http_header_end db 13, 10
+str_http_header_end.size = $ - str_http_header_end
+
+; str_http_headers db "HTTP/1.1 200 OK", 13, 10
+;                  db "Content-Type: text/html; charset=utf-8", 13, 10
+;                  db "Connection: close", 13, 10
+;                  db 13, 10
+; str_http_headers.size = $ - str_http_headers
 
 ; str_html_page_main db "<h1>Hello from flat asm</h1>", 10
 str_html_page_main db "<!DOCTYPE html>", 10

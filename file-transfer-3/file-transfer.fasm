@@ -586,6 +586,9 @@ handle_request:
     cmp [url.len], 4
     je .requested_script_file_upload
 
+    cmp [url.len], 5
+    je .requested_script_file_download
+
     jmp .requested_page_main
 
     .requested_page_main:
@@ -602,6 +605,10 @@ handle_request:
     
     .requested_script_file_upload:
         call handle_script_file_upload
+        jmp .return
+
+    .requested_script_file_download:
+        call handle_script_file_download
         jmp .return
 
     .return:
@@ -660,13 +667,14 @@ handle_script_file_upload:
 
     handle_script_file_upload.copy_to_file_loop:
 
+        ; TODO this can be improved by using a bigger buffer; make a dediacated variable for this
         sys_read [connfd], tmp_8B, tmp_8B.size
         cmp rax, 0
         jle handle_script_file_upload.copy_to_file_loop_done
 
-        ; print tmp_8B, tmp_8B.size
-
-        sys_write [file_send_upload_fd], tmp_8B, tmp_8B.size
+        ; sys_write [file_send_upload_fd], tmp_8B, tmp_8B.size
+        mov rdx, rax
+        sys_write [file_send_upload_fd], tmp_8B, rdx
     
     jmp handle_script_file_upload.copy_to_file_loop
 
@@ -677,7 +685,7 @@ handle_script_file_upload:
     mov [tmp_timeval.tv_usec], 0
     sys_setsockopt [connfd], SOL_SOCKET, SO_RCVTIMEO, tmp_timeval, tmp_timeval.size
 
-    ; now we need to delete the last (`multipart_boundary.len` + 7["--"+"--"+"\n19"] + 2?["\r\n"]) characters
+    ; now we need to delete the last (`multipart_boundary.len` + 7["--"+"--"+"\n19"] + 1?["\r"]) characters
 
     sys_lseek [file_send_upload_fd], 0, SEEK_CUR
     mov [tmp_8B], rax ; current offset
@@ -686,7 +694,7 @@ handle_script_file_upload:
     mov rcx, 0
     mov cl, [multipart_boundary.len]
     sub [tmp_8B], rcx
-    sub [tmp_8B], 9
+    sub [tmp_8B], 8
 
     sys_ftruncate [file_send_upload_fd], [tmp_8B]
 
@@ -695,6 +703,11 @@ handle_script_file_upload:
     mov rax, 0
     mov al, [multipart_boundary.len]
 
+    ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;; fnc
+
+handle_script_file_download:
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section
@@ -768,7 +781,7 @@ str_html_page_download.size = $ - str_html_page_download
 ; str_html_page_upload db "<h1>upload page</h1>", 10
 str_html_page_upload db "<!DOCTYPE html>", 10    
     db "<html>", 10
-    db '<form action="/script_file_download" method="post">', 10
+    db '<form action="/sdwn" method="post">', 10
     db "  <button>Click to download</button>", 10
     db "</form>", 10
     db "</html>", 10

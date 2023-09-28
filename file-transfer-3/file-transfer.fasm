@@ -100,7 +100,7 @@ SHUTDOWN_READ_AND_WRITE equ 2
 MAX_CONNECTIONS equ 5
 SERVING_THREADS equ 20
 URL_MAXLEN equ 128 ; in bytes
-HEADER_LINE_MAXLEN equ 128 ; in bytes
+HEADER_LINE_MAXLEN equ 128 ; in bytes ; TODO currently this is not long enough for the cookies line
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: idkman
 
@@ -408,7 +408,7 @@ receive_header:
         inc [url.len]
 
         cmp [url.len], URL_MAXLEN
-        je receive_header_return ; url is too long, abandon ship
+        je receive_header_return ; url is too long, abandon ship ; TODO terminating the commection is probably better
 
         jmp receive_next_byte_from_url
     url_received:
@@ -492,13 +492,31 @@ read_next_header_line:
         inc [header_line.len]
 
         cmp [header_line.len], HEADER_LINE_MAXLEN
-        je read_next_header_line.line_done ; TODO ideally we would discard the rest of the line
+        je read_next_header_line.cut_until_end_of_line
 
         mov al, [tmp_1B_b]
         mov [tmp_1B_a], al
 
-        jmp read_next_header_line.loop
+    jmp read_next_header_line.loop
     
+    read_next_header_line.cut_until_end_of_line:
+
+        sys_read [connfd], tmp_1B_b, tmp_1B_b.size
+
+        cmp [tmp_1B_b], 10 ; \n
+        jne read_next_header_line.discard_next_byte
+        cmp [tmp_1B_a], 13 ; \r
+        jne read_next_header_line.discard_next_byte
+
+        jmp read_next_header_line.line_done
+
+        read_next_header_line.discard_next_byte:
+
+        mov al, [tmp_1B_b]
+        mov [tmp_1B_a], al
+
+    jmp read_next_header_line.cut_until_end_of_line
+
     read_next_header_line.line_done:
 
     pop rax

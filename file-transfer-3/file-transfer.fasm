@@ -215,6 +215,72 @@ macro create_tcp_socket {
     tcp_socket_ok: ;; TODO try and use `$` or something similar so that the macro can be used more than once
 }
 
+macro extract_header_field prefix, prefix_len, header_line, header_line_len, resulting_data, resulting_data_len {
+
+    ; check for the multipart boundary
+
+    mov dl, prefix_len
+    mov dh, header_line_len
+
+    ; received line is too short
+    cmp dh, dl
+    jle extract_header_field.return
+
+    ; compare strings
+
+    mov rax, prefix
+    mov rbx, header_line
+
+    .compare_next_char:
+
+        cmp dl, 0
+        je extract_header_field.found_boundary_line
+
+        ; read char from expected multipart
+        mov cl, [rax]
+        inc rax
+
+        ; read char from received line
+        mov ch, [rbx]
+        inc rbx
+
+        ; see if they're the same
+        cmp cl, ch
+        jne extract_header_field.return
+
+        dec dl
+
+    jmp .compare_next_char
+
+    extract_header_field.found_boundary_line:
+
+        mov rax, resulting_data
+
+        mov dl, prefix_len
+        mov dh, header_line_len
+
+        sub dh, dl
+        mov resulting_data_len, dh
+
+        .copy_boundary:
+
+            cmp dh, 0
+            je extract_header_field.return
+
+            ; copy
+            mov ch, [rbx]
+            inc rbx
+
+            mov [rax], ch
+            inc rax
+
+            dec dh
+        
+        jmp .copy_boundary
+
+    extract_header_field.return:
+}
+
 ;;;;;;;;;;;;;;;;;;;;;;;;; code section
 
 segment readable executable
@@ -369,7 +435,7 @@ read_rest_of_header:
 
     mov [multipart_boundary.len], 0
 
-    .read_next_line:
+    read_rest_of_header.read_next_line:
 
         call read_next_header_line
 
@@ -378,72 +444,19 @@ read_rest_of_header:
         print header_line, rdx
 
         cmp [header_line.len], 0
-        je .return
+        je read_rest_of_header.return
 
-        ; check for the multipart boundary
+        extract_header_field \
+            str_header_line_multipart_boundary, \
+            str_header_line_multipart_boundary.size, \
+            header_line, \
+            [header_line.len], \
+            multipart_boundary, \
+            [multipart_boundary.len]
 
-        mov dl, str_header_line_multipart_boundary.size
-        mov dh, [header_line.len]
-
-        ; received line is too short
-        cmp dh, dl
-        jle .read_next_line
-
-        ; compare strings
-
-        mov rax, str_header_line_multipart_boundary
-        mov rbx, header_line
-
-        .compare_next_char:
-
-            cmp dl, 0
-            je .found_boundary_line
-
-            ; read char from expected multipart
-            mov cl, [rax]
-            inc rax
-
-            ; read char from received line
-            mov ch, [rbx]
-            inc rbx
-
-            ; see if they're the same
-            cmp cl, ch
-            jne .read_next_line
-
-            dec dl
-
-        jmp .compare_next_char
-
-        .found_boundary_line:
-
-            mov rax, multipart_boundary
-
-            mov dl, str_header_line_multipart_boundary.size
-            mov dh, [header_line.len]
-
-            sub dh, dl
-            mov [multipart_boundary.len], dh
-
-            .copy_boundary:
-
-                cmp dh, 0
-                je .read_next_line    
-
-                ; copy
-                mov ch, [rbx]
-                inc rbx
-
-                mov [rax], ch
-                inc rax
-
-                dec dh
-            
-            jmp .copy_boundary
-
-    jmp .read_next_line
+    jmp read_rest_of_header.read_next_line
     
-    .return:
+    read_rest_of_header.return:
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc

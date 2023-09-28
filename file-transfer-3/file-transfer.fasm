@@ -56,7 +56,10 @@ format ELF64 executable
 
 SYSCALL_READ equ 0
 SYSCALL_WRITE equ 1
+SYSCALL_OPEN equ 2
 SYSCALL_CLOSE equ 3
+SYSCALL_LSEEK equ 8
+SYSCALL_SENDFILE equ 40
 SYSCALL_SOCKET equ 41
 SYSCALL_ACCEPT equ 43
 SYSCALL_SHUTDOWN equ 48
@@ -65,6 +68,7 @@ SYSCALL_LISTEN equ 50
 SYSCALL_SETSOCKOPT equ 54
 SYSCALL_FORK equ 57
 SYSCALL_EXIT equ 60
+SYSCALL_FTRUNCATE equ 77
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: files
 
@@ -90,10 +94,33 @@ SOCKET_TYPE_TCP equ 1
 SOL_SOCKET equ 1
 SO_REUSEADDR equ 2
 SO_REUSEPORT equ 15
+SO_RCVTIMEO equ 20
 
 SHUTDOWN_READ equ 0
 SHUTDOWN_WRITE equ 1
 SHUTDOWN_READ_AND_WRITE equ 2
+
+; more flags
+; https://pubs.opengroup.org/onlinepubs/007904875/functions/open.html
+; https://www.geeksforgeeks.org/input-output-system-calls-c-create-open-close-read-write/
+O_RDONLY equ 0
+O_WRONLY equ 1
+O_RDWR equ 2
+O_CREAT equ 64 ; Create a file if it doesn’t exist.
+O_TRUNC equ 512 ; If the file exists and is a regular file, and the file is successfully opened O_RDWR or O_WRONLY, its length shall be truncated to 0, and the mode and owner shall be unchanged. It shall have no effect on FIFO special files or terminal device files. Its effect on other file types is implementation-defined. The result of using O_TRUNC with O_RDONLY is undefined.
+; O_EXCL	Prevent creation if it already exists.
+; O_ APPEND	Opens the file and places the cursor at the end of the contents.
+; O_ASYNC	Enable input and output control by signal.
+; O_CLOEXEC	Enable close-on-exec mode on the open file.
+; O_NONBLOCK	Disables blocking of the file opened.
+; O_TMPFILE	Create an unnamed temporary file at the specified path.
+
+S_IRUSR equ 256
+S_IWUSR equ 128
+S_IRGRP equ 32
+S_IROTH equ 4
+
+SEEK_CUR equ 1
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: server parameters
 
@@ -101,6 +128,8 @@ MAX_CONNECTIONS equ 5
 SERVING_THREADS equ 20
 URL_MAXLEN equ 128 ; in bytes
 HEADER_LINE_MAXLEN equ 128 ; in bytes ; TODO currently this is not long enough for the cookies line
+FILE_UPLOAD_TIMEOUT_SEC equ 0
+FILE_UPLOAD_TIMEOUT_USEC equ 500_000 ; 1_000_000 is 1sec
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: idkman
 
@@ -153,6 +182,10 @@ macro sys5 syscall_id, arg1, arg2, arg3, arg4, arg5
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; macros: syscalls: generic
 
+macro sys_close fd {
+    sys1 SYSCALL_CLOSE, fd
+}
+
 macro sys_exit ret_code {
     sys1 SYSCALL_EXIT, ret_code
 }
@@ -161,8 +194,24 @@ macro sys_fork {
     sys0 SYSCALL_FORK
 }
 
+macro sys_ftruncate fd, length {
+    sys2 SYSCALL_FTRUNCATE, fd, length
+}
+
+macro sys_lseek fd, offset, whence {
+    sys3 SYSCALL_LSEEK, fd, offset, whence
+}
+
+macro sys_open file_name, flags, mode {
+    sys3 SYSCALL_OPEN, file_name, flags, mode
+}
+
 macro sys_read fd, buf, size {
     sys3 SYSCALL_READ, fd, buf, size
+}
+
+macro sys_sendfile fd_out, fd_in, offset, count {
+    sys4 SYSCALL_SENDFILE, fd_out, fd_in, offset, count
 }
 
 macro sys_setsockopt fd, level, optname, optval, optlen {
@@ -185,10 +234,6 @@ macro sys_accept sockfd, addr, addr_len {
 
 macro sys_bind sockfd, addr, addr_len {
     sys3 SYSCALL_BIND, sockfd, addr, addr_len
-}
-
-macro sys_close fd {
-    sys1 SYSCALL_CLOSE, fd
 }
 
 macro sys_listen sockfd, max_connections {
@@ -341,6 +386,8 @@ main:
     bullshit:
     jmp bullshit
 
+    ; jmp serving_thread
+
     sys_shutdown [sockfd], SHUTDOWN_READ_AND_WRITE
     sys_close [sockfd]
 
@@ -417,6 +464,7 @@ receive_header:
     mov dl, [url.len]
     print url, rdx
 
+    mov [multipart_boundary.len], 0
     call read_rest_of_header
 
     ; len would be 0 if it was not found
@@ -432,8 +480,6 @@ receive_header:
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 read_rest_of_header:
-
-    mov [multipart_boundary.len], 0
 
     read_rest_of_header.read_next_line:
 
@@ -453,6 +499,8 @@ read_rest_of_header:
             [header_line.len], \
             multipart_boundary, \
             [multipart_boundary.len]
+        
+        ;; TODO save `Content-Disposition: form-data; name="file"; filename="todo-hoi4mod"`
 
     jmp read_rest_of_header.read_next_line
     
@@ -586,6 +634,67 @@ handle_page_upload:
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
 handle_script_file_upload:
+
+    call read_rest_of_header
+
+    mov rsi, O_WRONLY
+    or rsi, O_CREAT ; bitwise or
+    or rsi, O_TRUNC ; bitwise or
+
+    mov rdx, S_IRUSR
+    or rdx, S_IWUSR
+    or rdx, S_IRGRP
+    or rdx, S_IROTH
+
+    sys_open path_file_send_upload_to, rsi, rdx
+    mov [file_send_upload_fd], rax
+
+    ; ; mov [tmp_8B], 0
+    ; ; sys_sendfile [file_send_upload_fd], [connfd], tmp_8B, 1
+    ; sys_sendfile [file_send_upload_fd], [connfd], 0, 1
+    ; sys_exit rax
+
+    mov [tmp_timeval.tv_sec], FILE_UPLOAD_TIMEOUT_SEC
+    mov [tmp_timeval.tv_usec], FILE_UPLOAD_TIMEOUT_USEC
+    sys_setsockopt [connfd], SOL_SOCKET, SO_RCVTIMEO, tmp_timeval, tmp_timeval.size
+
+    handle_script_file_upload.copy_to_file_loop:
+
+        sys_read [connfd], tmp_8B, tmp_8B.size
+        cmp rax, 0
+        jle handle_script_file_upload.copy_to_file_loop_done
+
+        ; print tmp_8B, tmp_8B.size
+
+        sys_write [file_send_upload_fd], tmp_8B, tmp_8B.size
+    
+    jmp handle_script_file_upload.copy_to_file_loop
+
+    handle_script_file_upload.copy_to_file_loop_done:
+
+    ; this can become dangerous once we switch to nonblocking/blocking-with-timeout
+    mov [tmp_timeval.tv_sec], 0
+    mov [tmp_timeval.tv_usec], 0
+    sys_setsockopt [connfd], SOL_SOCKET, SO_RCVTIMEO, tmp_timeval, tmp_timeval.size
+
+    ; now we need to delete the last (`multipart_boundary.len` + 7["--"+"--"+"\n19"] + 2?["\r\n"]) characters
+
+    sys_lseek [file_send_upload_fd], 0, SEEK_CUR
+    mov [tmp_8B], rax ; current offset
+
+    ; calc new size
+    mov rcx, 0
+    mov cl, [multipart_boundary.len]
+    sub [tmp_8B], rcx
+    sub [tmp_8B], 9
+
+    sys_ftruncate [file_send_upload_fd], [tmp_8B]
+
+    sys_close [file_send_upload_fd]
+
+    mov rax, 0
+    mov al, [multipart_boundary.len]
+
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section
@@ -611,6 +720,9 @@ tmp_1B_b.size = $ - tmp_1B_b
 
 tmp_4B 1B 0,0,0,0
 tmp_4B.size = $ - tmp_4B
+
+tmp_8B 8B 0
+tmp_8B.size = $ - tmp_8B
 
 ;;;;;;;;;;;;;; other data
 
@@ -692,8 +804,8 @@ servaddr servaddr_in ;; OMT tova e kato `equ` i `=` (note that moje da dava6 par
 cliaddr servaddr_in
 cliaddr_size dd servaddr.size
 
-method 1B 0
 
+method 1B 0
 
 header_line 1B 0
 rept (HEADER_LINE_MAXLEN-1) {
@@ -712,3 +824,21 @@ rept (HEADER_LINE_MAXLEN-1) {
     1B 0
 }
 multipart_boundary.len 1B 0
+
+
+path_file_send_upload_to db "/tmp/uploaded-file-data", 0
+file_send_upload_fd dq 0
+
+
+; struct timeval {
+;    time_t      tv_sec;   // Number of whole seconds of elapsed time
+;    long int    tv_usec;  // Number of microseconds of rest of elapsed time minus tv_sec. Always less than one million
+; };
+;
+struc timeval {
+    .tv_sec  8B 0
+    .tv_usec 8B 0
+    .size = $ - .tv_sec
+}
+
+tmp_timeval timeval

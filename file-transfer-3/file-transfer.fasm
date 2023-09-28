@@ -215,35 +215,6 @@ macro create_tcp_socket {
     tcp_socket_ok: ;; TODO try and use `$` or something similar so that the macro can be used more than once
 }
 
-; macro are_strings_equal str1, len1, str2, len2, label_if_equal, label_if_not_equal {
-;     mov dl, len1
-;     mov dh, len2
-
-;     cmp dl, dh
-;     jne label_if_not_equal
-
-;     mov rax, str1
-;     mov rbx, str2
-
-;     string_compare_loop: ; TODO see https://board.flatassembler.net/topic.php?t=7344
-
-;         cmp dl, 0
-;         je label_if_equal
-
-;         mov cl, [rax]
-;         inc rax
-
-;         mov ch, [rbx]
-;         inc rbx
-
-;         cmp cl, ch
-;         jne label_if_not_equal
-
-;         dec dl
-
-;     jmp string_compare_loop
-; }
-
 ;;;;;;;;;;;;;;;;;;;;;;;;; code section
 
 segment readable executable
@@ -477,57 +448,6 @@ read_rest_of_header:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
-; save_header_line_content_type_boundary:
-;     save_header_line_content_type_boundary.begin_again:
-
-;     call read_next_header_line
-
-;     cmp [header_line.len], 0
-;     je save_header_line_content_type_boundary.ret
-
-;     are_strings_equal \
-;         str_header_line_content_type_containing_boundary, \
-;         str_header_line_content_type_containing_boundary.size, \
-;         header_line, \
-;         str_header_line_content_type_containing_boundary.size, \
-;         save_header_line_content_type_boundary.found, \
-;         save_header_line_content_type_boundary.begin_again
-
-;     save_header_line_content_type_boundary.found:
-
-;     ; mov rax, header_line
-;     ; add rax, str_header_line_content_type_containing_boundary.size
-
-;     ; mov bl, [header_line.len]
-;     ; sub bl, str_header_line_content_type_containing_boundary.size
-
-;     ; mov bh, bl ; save length for later
-
-;     ; mov rcx, multipart_boundary
-
-;     ; ; TODO now copy the rest to the `multipart_boundary` buf
-;     ; save_header_line_content_type_boundary.copy_loop:
-;     ;     cmp bl, 0
-;     ;     je .copy_done ; TODO hopefully this work as a local label
-
-;     ;     mov bh, [rax] ; read byte to bh
-;     ;     inc rax
-
-;     ;     mov [rdx], bh ; put byte in `multipart_boundary`
-;     ;     inc rdx
-
-;     ;     dec bl
-    
-;     ;     jmp save_header_line_content_type_boundary.copy_loop
-;     ; .copy_done:
-
-;     ; mov [multipart_boundary.len], bh
-
-;     save_header_line_content_type_boundary.ret:
-;     ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;; fnc
-
 read_next_header_line:
     
     mov rax, header_line
@@ -579,29 +499,33 @@ handle_request:
     call send_http_headers
 
     cmp [url.len], 2
-    je requested_page_download
+    je .requested_page_download
 
     cmp [url.len], 3
-    je requested_page_upload
+    je .requested_page_upload
 
     cmp [url.len], 4
-    je requested_script_file_upload
+    je .requested_script_file_upload
 
-    jmp requested_page_main
+    jmp .requested_page_main
 
-    requested_page_main:
+    .requested_page_main:
         call handle_page_main
-        jmp handle_request_return
+        jmp .return
 
-    requested_page_download:
+    .requested_page_download:
         call handle_page_download
-        jmp handle_request_return
+        jmp .return
 
-    requested_page_upload:
+    .requested_page_upload:
         call handle_page_upload
-        jmp handle_request_return
+        jmp .return
+    
+    .requested_script_file_upload:
+        call handle_script_file_upload
+        jmp .return
 
-    handle_request_return:
+    .return:
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
@@ -630,7 +554,7 @@ handle_page_upload:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
 
-requested_script_file_upload:
+handle_script_file_upload:
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; data section

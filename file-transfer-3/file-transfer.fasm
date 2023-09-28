@@ -7,6 +7,8 @@
 
 ;; info
 ;;
+;; cool resource http://bos.asmhackers.net/docs/FASM%20tutorial/preproc.html
+;;
 ;; registers:
 ;; rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14 (and more)
 ;;
@@ -272,6 +274,8 @@ macro create_tcp_socket {
 
 macro extract_header_field prefix, prefix_len, header_line, header_line_len, resulting_data, resulting_data_len {
 
+    local return, found_boundary_line, compare_next_char ; now we can use this macro multiple times
+
     ; check for the multipart boundary
 
     mov dl, prefix_len
@@ -279,17 +283,17 @@ macro extract_header_field prefix, prefix_len, header_line, header_line_len, res
 
     ; received line is too short
     cmp dh, dl
-    jle extract_header_field.return
+    jle return
 
     ; compare strings
 
     mov rax, prefix
     mov rbx, header_line
 
-    .compare_next_char:
+    compare_next_char:
 
         cmp dl, 0
-        je extract_header_field.found_boundary_line
+        je found_boundary_line
 
         ; read char from expected multipart
         mov cl, [rax]
@@ -301,13 +305,13 @@ macro extract_header_field prefix, prefix_len, header_line, header_line_len, res
 
         ; see if they're the same
         cmp cl, ch
-        jne extract_header_field.return
+        jne return
 
         dec dl
 
-    jmp .compare_next_char
+    jmp compare_next_char
 
-    extract_header_field.found_boundary_line:
+    found_boundary_line:
 
         mov rax, resulting_data
 
@@ -320,7 +324,7 @@ macro extract_header_field prefix, prefix_len, header_line, header_line_len, res
         .copy_boundary:
 
             cmp dh, 0
-            je extract_header_field.return
+            je return
 
             ; copy
             mov ch, [rbx]
@@ -333,7 +337,23 @@ macro extract_header_field prefix, prefix_len, header_line, header_line_len, res
         
         jmp .copy_boundary
 
-    extract_header_field.return:
+    return:
+}
+
+macro send_html_page_download_begin sock {
+    sys_write sock, str_html_page_download_begin, str_html_page_download_begin.size
+}
+
+macro send_html_page_download_button sock, filename, filename_len {
+    sys_write sock, str_html_page_download_button_part1, str_html_page_download_button_part1.size
+    sys_write sock, filename, filename_len
+    sys_write sock, str_html_page_download_button_part2, str_html_page_download_button_part2.size
+    sys_write sock, filename, filename_len
+    sys_write sock, str_html_page_download_button_part3, str_html_page_download_button_part3.size
+}
+
+macro send_html_page_download_end sock {
+    sys_write sock, str_html_page_download_end, str_html_page_download_end.size
 }
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; code section
@@ -440,6 +460,8 @@ receive_header:
 
     cmp [tmp_4B], 'G'
     je method_get ; assume GET
+
+    ; cmp [tmp_4B], 'P'
     jmp method_post ; assume POST
 
     method_get:
@@ -480,12 +502,17 @@ receive_header:
     print url, rdx
 
     mov [multipart_boundary.len], 0
+    mov [file_upload_filename.len], 0
     call read_rest_of_header
 
-    ; len would be 0 if it was not found
-    mov rdx, 0
-    mov dl, [multipart_boundary.len]
-    print multipart_boundary, rdx
+    ; ; len would be 0 if it was not found
+    ; mov rdx, 0
+    ; mov dl, [multipart_boundary.len]
+    ; print multipart_boundary, rdx
+
+    ; mov rdx, 0
+    ; mov dl, [file_upload_filename.len]
+    ; print file_upload_filename, rdx
 
     call handle_request
 
@@ -515,7 +542,13 @@ read_rest_of_header:
             multipart_boundary, \
             [multipart_boundary.len]
         
-        ;; TODO save `Content-Disposition: form-data; name="file"; filename="todo-hoi4mod"`
+        extract_header_field \
+            str_header_line_file_upload_filename, \
+            str_header_line_file_upload_filename.size, \
+            header_line, \
+            [header_line.len], \
+            file_upload_filename, \ ; we're keeping the first and the last `"` on purpose
+            [file_upload_filename.len]
 
     jmp read_rest_of_header.read_next_line
     
@@ -592,16 +625,28 @@ handle_request:
 
     sys_write [connfd], str_http_header_begin, str_http_header_begin.size
 
-    cmp [url.len], 2
-    je .requested_page_download
+    ; check method then check URL
 
-    cmp [url.len], 3
+    ; cmp [method], METHOD_POST
+    ; je .requested_script_file_download
+
+    mov rax, url
+    inc rax ; skip past the `/`
+
+    ; cmp [url.len], 2
+    cmp byte [rax], '2'
     je .requested_page_upload
 
-    cmp [url.len], 4
+    ; cmp [url.len], 3
+    cmp byte [rax], '3'
+    je .requested_page_download
+
+    ; cmp [url.len], 4
+    cmp byte [rax], '4'
     je .requested_script_file_upload
 
-    cmp [url.len], 5
+    ; cmp [url.len], 5
+    cmp byte [rax], '5'
     je .requested_script_file_download
 
     jmp .requested_page_main
@@ -640,7 +685,17 @@ handle_page_main:
 
 handle_page_download:
     sys_write [connfd], str_http_header_end, str_http_header_end.size
-    sys_write [connfd], str_html_page_download, str_html_page_download.size
+    ; sys_write [connfd], str_html_page_download, str_html_page_download.size
+
+    send_html_page_download_begin [connfd]
+
+    send_html_page_download_button \
+        [connfd], \
+        path_file_send_upload_to, \
+        path_file_send_upload_to.size
+
+    send_html_page_download_end [connfd]
+
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
@@ -657,6 +712,13 @@ handle_script_file_upload:
 
     call read_rest_of_header
 
+    ; make sure there's a 0 at the end of the filename (we DO have enough mem in buf)
+    mov rbx, 0
+    mov bl, [file_upload_filename.len]
+    mov rax, file_upload_filename
+    add rax, rbx
+    mov byte [rax], 0
+
     mov rsi, O_WRONLY
     or rsi, O_CREAT ; bitwise or
     or rsi, O_TRUNC ; bitwise or
@@ -666,7 +728,7 @@ handle_script_file_upload:
     or rdx, S_IRGRP
     or rdx, S_IROTH
 
-    sys_open path_file_send_upload_to, rsi, rdx
+    sys_open file_upload_filename, rsi, rdx
     mov [file_send_upload_fd], rax
 
     ; ; mov [tmp_8B], 0
@@ -722,7 +784,22 @@ handle_script_file_upload:
 
 handle_script_file_download:
 
-    sys_write [connfd], str_http_header_attachment, str_http_header_attachment.size
+    ; sys_write [connfd], str_http_header_attachment, str_http_header_attachment.size
+
+    sys_write [connfd], str_http_header_attachment_begin, str_http_header_attachment_begin.size
+
+    mov rdx, 0
+    mov dl, [url.len]
+
+    mov rsi, url
+    ; skip slash and magic number
+    add rsi, 2
+    sub dl, 2
+
+    sys_write [connfd], rsi, rdx
+
+    sys_write [connfd], str_http_header_attachment_end, str_http_header_attachment_end.size
+
     sys_write [connfd], str_http_header_end, str_http_header_end.size
 
     mov rsi, O_RDONLY
@@ -778,60 +855,84 @@ tmp_8B.size = $ - tmp_8B
 str_starting_program db "starting server"
 str_starting_program_len = $ - str_starting_program
 
+
 ; not ideal but why not; avoid some complexity for now
 str_http_header_begin db "HTTP/1.1 200 OK", 13, 10
-                      db "Content-Type: text/html; charset=utf-8", 13, 10
+;                      db "Content-Type: text/html; charset=utf-8", 13, 10 ; this seems cool but it fucks with the file upload
                       db "Connection: close", 13, 10
 str_http_header_begin.size = $ - str_http_header_begin
 
-str_http_header_attachment db 'Content-disposition: attachment; filename="gucci-file.bin"', 13, 10
-str_http_header_attachment.size = $ - str_http_header_attachment
+
+; str_http_header_attachment db 'Content-disposition: attachment; filename="gucci-file.bin"', 13, 10
+; str_http_header_attachment.size = $ - str_http_header_attachment
+str_http_header_attachment_begin db 'Content-disposition: attachment; filename='
+str_http_header_attachment_begin.size = $ - str_http_header_attachment_begin
+
+str_http_header_attachment_end db '"', 13, 10
+str_http_header_attachment_end.size = $ - str_http_header_attachment_end
+
 
 str_http_header_end db 13, 10
 str_http_header_end.size = $ - str_http_header_end
 
-; str_http_headers db "HTTP/1.1 200 OK", 13, 10
-;                  db "Content-Type: text/html; charset=utf-8", 13, 10
-;                  db "Connection: close", 13, 10
-;                  db 13, 10
-; str_http_headers.size = $ - str_http_headers
 
-; str_html_page_main db "<h1>Hello from flat asm</h1>", 10
 str_html_page_main db "<!DOCTYPE html>", 10
                    db "<html>", 10
                    db "  <head>", 10
                    db "    <title>asdasdsdafcstgcreztre</title>", 10
                    db "  </head>", 10
                    db "  <body>", 10
-                   db '    <a href="/u" target="_blank">file upload</a>', 10
+                   db '    <a href="/2" target="_blank">file upload</a>', 10
                    db "    <br>", 10
-                   db '    <a href="/dw" target="_blank">file download</a>', 10
+                   db '    <a href="/3" target="_blank">file download</a>', 10
                    db "  </body>", 10
                    db "</html>", 10
 str_html_page_main.size = $ - str_html_page_main
 
-; str_html_page_download db "<h1>download page</h1>", 10
-str_html_page_download db "<!DOCTYPE html>", 10
+
+; str_html_page_download db "<!DOCTYPE html>", 10
+;     db "<html>", 10
+;     db '<form action="/sdwn" method="post">', 10
+;     db "  <button>Click to download</button>", 10
+;     db "</form>", 10
+;     db "</html>", 10
+; str_html_page_download.size = $ - str_html_page_download
+
+str_html_page_download_begin db "<!DOCTYPE html>", 10
+                             db "<html>", 10
+str_html_page_download_begin.size = $ - str_html_page_download_begin
+
+    str_html_page_download_button_part1 db '<form action="/5'
+    str_html_page_download_button_part1.size = $ - str_html_page_download_button_part1
+    ; file name goes here; example: asdfg.txt
+    str_html_page_download_button_part2 db '" method="post">', 10
+                                        db '  <button>Click to download: '
+    str_html_page_download_button_part2.size = $ - str_html_page_download_button_part2
+    ; file name goes here; example: asdfg.txt
+    str_html_page_download_button_part3 db '</button>', 10
+                                        db '</form>', 10
+    str_html_page_download_button_part3.size = $ - str_html_page_download_button_part3
+
+str_html_page_download_end db "</html>", 10
+str_html_page_download_end.size = $ - str_html_page_download_end
+
+
+str_html_page_upload db "<!DOCTYPE html>", 10    
     db "<html>", 10
-    db '<form action="/sup" method="post" enctype="multipart/form-data">', 10
+    db '<form action="/4" method="post" enctype="multipart/form-data">', 10
     db '  <label for="file">File</label>', 10
     db '  <input id="file" name="file" type="file" />', 10
     db "  <button>Upload</button>", 10
-    db "</form>", 10
-    db "</html>", 10
-str_html_page_download.size = $ - str_html_page_download
-
-; str_html_page_upload db "<h1>upload page</h1>", 10
-str_html_page_upload db "<!DOCTYPE html>", 10    
-    db "<html>", 10
-    db '<form action="/sdwn" method="post">', 10
-    db "  <button>Click to download</button>", 10
     db "</form>", 10
     db "</html>", 10
 str_html_page_upload.size = $ - str_html_page_upload
 
 str_header_line_multipart_boundary db "Content-Type: multipart/form-data; boundary="
 str_header_line_multipart_boundary.size = $ - str_header_line_multipart_boundary
+
+str_header_line_file_upload_filename db 'Content-Disposition: form-data; name="file"; filename='
+; Content-Disposition: form-data; name="file"; filename="todo-hoi4mod"
+str_header_line_file_upload_filename.size = $ - str_header_line_file_upload_filename
 
 ;;;;;;;; other
 
@@ -881,8 +982,15 @@ rept (HEADER_LINE_MAXLEN-1) {
 }
 multipart_boundary.len 1B 0
 
+file_upload_filename 1B 0
+rept (HEADER_LINE_MAXLEN-1) {
+    1B 0
+}
+file_upload_filename.len 1B 0
 
-path_file_send_upload_to db "uploaded-file-data", 0
+
+path_file_send_upload_to db "uploaded-file-data", 0 ; TODO useless, delete
+path_file_send_upload_to.size = $ - path_file_send_upload_to - 1 ; TODO useless, delete
 file_send_upload_fd dq 0
 
 folder_uploaded_files db "/tmp/file-transfer-uploaded-files", 0

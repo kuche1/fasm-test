@@ -121,7 +121,7 @@ O_WRONLY equ 1
 O_RDWR equ 2
 O_CREAT equ 64 ; Create a file if it doesn’t exist.
 O_TRUNC equ 512 ; If the file exists and is a regular file, and the file is successfully opened O_RDWR or O_WRONLY, its length shall be truncated to 0, and the mode and owner shall be unchanged. It shall have no effect on FIFO special files or terminal device files. Its effect on other file types is implementation-defined. The result of using O_TRUNC with O_RDONLY is undefined.
-O_DIRECTORY equ 65536
+O_DIRECTORY equ 65536 ; used when opening directories (and not files)
 ; O_EXCL	Prevent creation if it already exists.
 ; O_ APPEND	Opens the file and places the cursor at the end of the contents.
 ; O_ASYNC	Enable input and output control by signal.

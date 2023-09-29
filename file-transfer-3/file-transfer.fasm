@@ -4,6 +4,8 @@
 ; TODO
 ;
 ; non-blocking IO and check ret code
+;
+; use `openat` instead of switching CWD
 
 ;; info
 ;;
@@ -71,6 +73,7 @@ SYSCALL_SETSOCKOPT equ 54
 SYSCALL_FORK equ 57
 SYSCALL_EXIT equ 60
 SYSCALL_FTRUNCATE equ 77
+SYSCALL_GETDENTS equ 78
 SYSCALL_CHDIR equ 80
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: files
@@ -112,6 +115,7 @@ O_WRONLY equ 1
 O_RDWR equ 2
 O_CREAT equ 64 ; Create a file if it doesn’t exist.
 O_TRUNC equ 512 ; If the file exists and is a regular file, and the file is successfully opened O_RDWR or O_WRONLY, its length shall be truncated to 0, and the mode and owner shall be unchanged. It shall have no effect on FIFO special files or terminal device files. Its effect on other file types is implementation-defined. The result of using O_TRUNC with O_RDONLY is undefined.
+O_DIRECTORY equ 65536
 ; O_EXCL	Prevent creation if it already exists.
 ; O_ APPEND	Opens the file and places the cursor at the end of the contents.
 ; O_ASYNC	Enable input and output control by signal.
@@ -128,10 +132,12 @@ SEEK_SET equ 0
 SEEK_CUR equ 1
 SEEK_END equ 2
 
+DT_REG equ 8 ; regular file
+
 ;;;;;;;;;;;;;;;;;;;;;;;;; comptime constants: server parameters
 
 MAX_CONNECTIONS equ 5
-SERVING_THREADS equ 20
+SERVING_THREADS equ 1 ; TODO 20
 URL_MAXLEN equ 128 ; in bytes
 HEADER_LINE_MAXLEN equ 128 ; in bytes ; TODO currently this is not long enough for the cookies line
 FILE_UPLOAD_TIMEOUT_SEC equ 0
@@ -208,6 +214,10 @@ macro sys_close fd {
 
 macro sys_ftruncate fd, length {
     sys2 SYSCALL_FTRUNCATE, fd, length
+}
+
+macro sys_getdents fd, linux_dirent, linux_dirent_size {
+    sys3 SYSCALL_GETDENTS, fd, linux_dirent, linux_dirent_size
 }
 
 macro sys_lseek fd, offset, whence {
@@ -492,10 +502,13 @@ receive_header:
         inc [url.len]
 
         cmp [url.len], URL_MAXLEN
-        je receive_header_return ; url is too long, abandon ship ; TODO terminating the commection is probably better
+        je url_received ; TODO idk what the appropriate action is ; TODO terminating the commection is probably better
 
         jmp receive_next_byte_from_url
     url_received:
+
+    ; put 0 at the end; don't worry we have enough mem
+    mov byte [rcx], 0
 
     mov rdx, 0
     mov dl, [url.len]
@@ -516,7 +529,6 @@ receive_header:
 
     call handle_request
 
-    receive_header_return:
     ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;; fnc
@@ -625,27 +637,18 @@ handle_request:
 
     sys_write [connfd], str_http_header_begin, str_http_header_begin.size
 
-    ; check method then check URL
-
-    ; cmp [method], METHOD_POST
-    ; je .requested_script_file_download
-
     mov rax, url
     inc rax ; skip past the `/`
 
-    ; cmp [url.len], 2
     cmp byte [rax], '2'
     je .requested_page_upload
 
-    ; cmp [url.len], 3
     cmp byte [rax], '3'
     je .requested_page_download
 
-    ; cmp [url.len], 4
     cmp byte [rax], '4'
     je .requested_script_file_upload
 
-    ; cmp [url.len], 5
     cmp byte [rax], '5'
     je .requested_script_file_download
 
@@ -685,16 +688,105 @@ handle_page_main:
 
 handle_page_download:
     sys_write [connfd], str_http_header_end, str_http_header_end.size
-    ; sys_write [connfd], str_html_page_download, str_html_page_download.size
 
     send_html_page_download_begin [connfd]
 
-    send_html_page_download_button \
-        [connfd], \
-        path_file_send_upload_to, \
-        path_file_send_upload_to.size
+    mov rsi, O_DIRECTORY
+    or rsi, O_RDONLY ; bitwise or
+
+    ; ; not sure if we need this
+    ; mov rdx, S_IRUSR
+    ; or rdx, S_IWUSR
+    ; or rdx, S_IRGRP
+    ; or rdx, S_IROTH
+    mov rdx, 0
+
+    sys_open folder_uploaded_files, rsi, rdx
+    mov [folder_uploaded_files_fd], rax
+
+    .get_dir_entries:
+
+        sys_getdents [folder_uploaded_files_fd], linux_dirent_buf, linux_dirent_buf.size
+        cmp rax, 0
+        je .no_more_dir_entries
+
+        mov [read_dir_nread], rax
+
+        mov [read_dir_bpos], 0
+
+        .read_some_more:
+
+            mov rax, [read_dir_nread]
+            cmp [read_dir_bpos], rax
+            jge .no_more_to_read
+
+            ; move to the appropriate offset
+            mov rax, linux_dirent_buf
+            add rax, [read_dir_bpos]
+            ; now this points to the relevant linux_dirent struct
+
+            mov rbx, rax
+            add rbx, linux_dirent_buf.offset.d_reclen
+                mov rcx, 0
+                mov cx, [rbx] ; this is now the reclen; reclen is 2bytes
+                mov rbx, rcx
+            add rbx, rax
+            dec rbx
+            mov bl, [rbx] ; this is now the d_type (1B)
+
+            ; TODO see why the fuck does this not work
+            ; cmp bl, DT_REG
+            ; jne .read_some_more_next_item ; if it's not a regular file just skip it
+
+            mov rbx, rax
+            add rbx, linux_dirent_buf.offset.d_name ; name of file
+
+            ; save filename
+            mov [tmp_8B_a], rbx
+
+            ; get filename len
+            mov rcx, 0
+            .try_next_char:
+                cmp byte [rbx], 0
+                je .last_char_reached
+                inc rbx
+                inc rcx
+            jmp .try_next_char
+            .last_char_reached:
+
+            ; save filename len
+            mov [tmp_8B], rcx
+
+            send_html_page_download_button \
+                [connfd], \
+                [tmp_8B_a], \
+                [tmp_8B]
+            
+            .read_some_more_next_item:
+
+            ; move to the appropriate offset
+            mov rax, linux_dirent_buf
+            add rax, [read_dir_bpos]
+            ; now this points to the relevant linux_dirent struct
+
+            mov rbx, rax
+            add rbx, linux_dirent_buf.offset.d_reclen
+                mov rcx, 0
+                mov cx, [rbx] ; this is now the reclen; reclen is 2bytes
+                mov rbx, rcx
+
+            ; mov rdx, [read_dir_nread] ; TODO this is wrong; it needs to be d_reclen
+            add [read_dir_bpos], rbx
+            
+        jmp .read_some_more
+        .no_more_to_read:
+
+    jmp .get_dir_entries
+    .no_more_dir_entries:
 
     send_html_page_download_end [connfd]
+
+    sys_close [folder_uploaded_files_fd]
 
     ret
 
@@ -784,17 +876,18 @@ handle_script_file_upload:
 
 handle_script_file_download:
 
-    ; sys_write [connfd], str_http_header_attachment, str_http_header_attachment.size
-
     sys_write [connfd], str_http_header_attachment_begin, str_http_header_attachment_begin.size
 
+    ; save file len
     mov rdx, 0
     mov dl, [url.len]
 
+    ; save file name
     mov rsi, url
     ; skip slash and magic number
     add rsi, 2
     sub dl, 2
+    push rsi ; push file name
 
     sys_write [connfd], rsi, rdx
 
@@ -804,7 +897,8 @@ handle_script_file_download:
 
     mov rsi, O_RDONLY
 
-    sys_open path_file_send_upload_to, rsi, 0
+    pop rdi ; pop file name
+    sys_open rdi, rsi, 0
     mov [file_send_upload_fd], rax
     
     ; get file size
@@ -847,6 +941,9 @@ tmp_4B.size = $ - tmp_4B
 
 tmp_8B 8B 0
 tmp_8B.size = $ - tmp_8B
+
+tmp_8B_a 8B 0
+tmp_8B_a.size = $ - tmp_8B_a
 
 ;;;;;;;;;;;;;; other data
 
@@ -971,7 +1068,7 @@ rept (HEADER_LINE_MAXLEN-1) {
 header_line.len 1B 0
 
 url 1B 0
-rept (URL_MAXLEN-1) {
+rept (URL_MAXLEN) { ; add 1 extra character in case we need to add 0 (so it is a c string)
        1B 0
 }
 url.len 1B 0
@@ -989,11 +1086,10 @@ rept (HEADER_LINE_MAXLEN-1) {
 file_upload_filename.len 1B 0
 
 
-path_file_send_upload_to db "uploaded-file-data", 0 ; TODO useless, delete
-path_file_send_upload_to.size = $ - path_file_send_upload_to - 1 ; TODO useless, delete
 file_send_upload_fd dq 0
 
 folder_uploaded_files db "/tmp/file-transfer-uploaded-files", 0
+folder_uploaded_files_fd dq 0
 
 ; struct timeval {
 ;    time_t      tv_sec;   // Number of whole seconds of elapsed time
@@ -1007,3 +1103,38 @@ struc timeval {
 }
 
 tmp_timeval timeval
+
+
+; struct linux_dirent {
+; 	unsigned long   d_ino;    // 8B
+; 	unsigned long   d_off;    // 8B
+; 	unsigned short  d_reclen; // 2B
+; 	char        d_name[];     // variable length
+; };
+;
+; struc linux_dirent {
+;     .d_ino    8B 0
+;     .d_off    8B 0
+;     .d_reclen 2B 0
+;     .d_name   db 0
+; rept (512-1) {
+;               db 0
+;     .size = $ - .d_ino
+; }
+; }
+;
+; linux_dirent_buf linux_dirent
+;
+linux_dirent_buf db 0
+rept (512-1) {
+    db 0
+}
+linux_dirent_buf.size = $ - linux_dirent_buf
+linux_dirent_buf.offset.d_reclen = 16
+linux_dirent_buf.offset.d_name = 18
+
+; read_dir_nread 4B 0
+read_dir_nread 8B 0
+
+; read_dir_bpos 4B 0
+read_dir_bpos 8B 0

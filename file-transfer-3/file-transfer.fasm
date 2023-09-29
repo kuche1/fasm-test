@@ -19,6 +19,10 @@
 ; or go tell the caller to fuck off
 ;
 ; decode URL or filter out special chars in file name
+;
+; use a giant buffer for network recv and operate on that buffer instead of making syscalls all the time
+;
+; add an "uploading..." message on the upload page
 
 ;; info
 ;;
@@ -599,6 +603,34 @@ read_rest_of_header:
             ; if it has been found remove the last character (it's a `"`)
             cmp [file_upload_filename.len], 0
             je read_rest_of_header.not_found_file_upload_filename
+
+            mov rax, file_upload_filename
+            .replace_bad_characters: ; HTML is retarded since it switches some of the characters for some retarded codes
+                                     ; we are going to avoid this altogether by replacing the bad characters beforehand
+                
+                cmp byte [rax], 0 ; end of string
+                je .bad_chars_replaced
+
+                ; replace ` ` with `_`
+                cmp byte [rax], ' '
+                je .replace_this_char
+                
+                cmp byte [rax], '"'
+                je .replace_this_char
+
+                cmp byte [rax], "'"
+                je .replace_this_char
+
+                jmp .char_replace_done
+                .replace_this_char:
+                    mov byte [rax], '_'
+                .char_replace_done:
+
+                inc rax
+
+            jmp .replace_bad_characters
+            .bad_chars_replaced:
+
 
             dec [file_upload_filename.len]
 

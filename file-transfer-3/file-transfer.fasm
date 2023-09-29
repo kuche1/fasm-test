@@ -6,6 +6,8 @@
 ; non-blocking IO and check ret code
 ;
 ; use `openat` instead of switching CWD
+;
+; make it so that having `"` in the file name doesn't fuck over the HTML
 
 ;; info
 ;;
@@ -282,7 +284,15 @@ macro create_tcp_socket {
     tcp_socket_ok: ;; TODO try and use `$` or something similar so that the macro can be used more than once
 }
 
-macro extract_header_field prefix, prefix_len, header_line, header_line_len, resulting_data, resulting_data_len {
+macro extract_header_field \
+    prefix, \
+    prefix_len, \
+    header_line, \
+    header_line_len, \
+    resulting_data, \
+    resulting_data_len, \
+    label_if_not_found
+{
 
     local return, found_boundary_line, compare_next_char ; now we can use this macro multiple times
 
@@ -293,7 +303,7 @@ macro extract_header_field prefix, prefix_len, header_line, header_line_len, res
 
     ; received line is too short
     cmp dh, dl
-    jle return
+    jle label_if_not_found
 
     ; compare strings
 
@@ -315,7 +325,7 @@ macro extract_header_field prefix, prefix_len, header_line, header_line_len, res
 
         ; see if they're the same
         cmp cl, ch
-        jne return
+        jne label_if_not_found
 
         dec dl
 
@@ -546,21 +556,34 @@ read_rest_of_header:
         cmp [header_line.len], 0
         je read_rest_of_header.return
 
+
         extract_header_field \
             str_header_line_multipart_boundary, \
             str_header_line_multipart_boundary.size, \
             header_line, \
             [header_line.len], \
             multipart_boundary, \
-            [multipart_boundary.len]
+            [multipart_boundary.len], \
+            read_rest_of_header.not_foud_multipart_boundart
+        read_rest_of_header.not_foud_multipart_boundart:
         
+
         extract_header_field \
             str_header_line_file_upload_filename, \
             str_header_line_file_upload_filename.size, \
             header_line, \
             [header_line.len], \
             file_upload_filename, \ ; we're keeping the first and the last `"` on purpose
-            [file_upload_filename.len]
+            [file_upload_filename.len], \
+            read_rest_of_header.not_found_file_upload_filename
+
+            ; if it has been found remove the last character (it's a `"`)
+            cmp [file_upload_filename.len], 0
+            je read_rest_of_header.not_found_file_upload_filename
+
+            dec [file_upload_filename.len]
+
+        read_rest_of_header.not_found_file_upload_filename:
 
     jmp read_rest_of_header.read_next_line
     
@@ -1027,7 +1050,7 @@ str_html_page_upload.size = $ - str_html_page_upload
 str_header_line_multipart_boundary db "Content-Type: multipart/form-data; boundary="
 str_header_line_multipart_boundary.size = $ - str_header_line_multipart_boundary
 
-str_header_line_file_upload_filename db 'Content-Disposition: form-data; name="file"; filename='
+str_header_line_file_upload_filename db 'Content-Disposition: form-data; name="file"; filename="'
 ; Content-Disposition: form-data; name="file"; filename="todo-hoi4mod"
 str_header_line_file_upload_filename.size = $ - str_header_line_file_upload_filename
 

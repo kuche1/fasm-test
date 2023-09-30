@@ -24,44 +24,49 @@
 ;
 ; add an "uploading..." message on the upload page
 
-;; info
-;;
-;; cool resource http://bos.asmhackers.net/docs/FASM%20tutorial/preproc.html
-;;
-;; registers:
-;; rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14 (and more)
-;;
-;; syscall args go to:
-;; arg0(syscall-number)=rax arg1=rdi arg2=rsi arg3=rdx arg4=r10 arg5=r8 arg6=r9
-;;
-;; (hepefully) all syscall return to `rax`
-;;
-;; db - byte - 1 byte
-;; dw - word - 2 bytes
-;; dd - double word - 4 bytes
-;; dq - quad word - 8 bytes
-;;
-;; rax is 64bits
-;; eax is 32bits
-;; for more info see https://en.wikibooks.org/wiki/X86_Assembly/X86_Architecture
+; info
+;
+; https://flatassembler.net/docs.php
+; http://bos.asmhackers.net/docs/FASM%20tutorial/preproc.html
+; https://en.wikibooks.org/wiki/X86_Assembly/X86_Architecture
+; https://chromium.googlesource.com/chromiumos/docs/+/HEAD/constants/syscalls.md
+;
+; registers: https://en.wikibooks.org/wiki/X86_Assembly/X86_Architecture
+; rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14 (and more)
+;
+; syscalls: https://chromium.googlesource.com/chromiumos/docs/+/HEAD/constants/syscalls.md
+; syscall args go to:
+; arg0(syscall-number)=rax arg1=rdi arg2=rsi arg3=rdx arg4=r10 arg5=r8 arg6=r9
+; (hepefully) all syscall return to `rax`
+;
+; data types: https://flatassembler.net/docs.php?article=manual#1.2.2
+; db - byte - 1 byte
+; dw - word - 2 bytes
+; dd - double word - 4 bytes
+; dq - quad word - 8 bytes
+; you can also reserve data
+; rb - 1 byte
+; rw - 2 bytes
+; rd - 4 bytes
+; rq - 8 bytes
 
-;; debug tips
-;;
-;; omg you get NO SYMBOLS WTF
-;; no `main`, no `_start`, nothing
-;;
-;; run with `strace`
-;;
-;; `readelf -e <file>` and find the `entry point address`
-;; then in `gdb <file>` put a breakpoint on that address `b *0x4000b0`
-;; then `run` and `tui enable` and `layout asm`
-;; and you will get an asm view
-;;
-;; less retarded debugger is `gf` executable is called `gf2` https://github.com/nakst/gf
-;; again, break on the entry point using `b *0x4000b0`
-;; switch to the `registers` tab
-;; start with `run`
-;; use `ni` for next step
+; debug tips
+;
+; omg you get NO SYMBOLS WTF
+; no `main`, no `_start`, nothing
+;
+; run with `strace`
+;
+; `readelf -e <file>` and find the `entry point address`
+; then in `gdb <file>` put a breakpoint on that address `b *0x4000b0`
+; then `run` and `tui enable` and `layout asm`
+; and you will get an asm view
+;
+; less retarded debugger is `gf` executable is called `gf2` https://github.com/nakst/gf
+; again, break on the entry point using `b *0x4000b0`
+; switch to the `registers` tab
+; start with `run`
+; use `ni` for next step
 
 format ELF64 executable
 
